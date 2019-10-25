@@ -119,9 +119,9 @@ def parseNone(path: List[str] = []) -> Parser[None]:
   err = error(type(None))
   return Parser(path, parsePrim(type(None), prim))
 
-def constNone() -> Parser[None]:
-  def x(j: JsonType) -> Parsed[None]:
-    return F2(None)
+def const(a: A) -> Parser[A]:
+  def x(j: JsonType) -> Parsed[A]:
+    return F2(a)
   return Parser([], x)
 
 def parseOptional(p: Parser[A]) -> Parser[Sum2[None, A]]:
@@ -139,8 +139,8 @@ class Combine2(Generic[A, B, C]):
   def __call__(self) -> Parser[C]:
     def x(t: Tuple[A, B, None, None, None, None, None]) -> C:
       return self.abc((t[0], t[1]))
-    return Combine7(self.pa, self.pb, constNone(), constNone(), 
-                    constNone(), constNone(), constNone(), x)()
+    return Combine7(self.pa, self.pb, const(None), const(None), 
+                    const(None), const(None), const(None), x)()
 
 class Combine3(Generic[A, B, C, D]):
 
@@ -151,8 +151,8 @@ class Combine3(Generic[A, B, C, D]):
   def __call__(self) -> Parser[D]:
     def x(t: Tuple[A, B, C, None, None, None, None]) -> D:
       return self.abc((t[0], t[1], t[2]))
-    return Combine7(self.pa, self.pb, self.pc, constNone(), 
-                    constNone(), constNone(), constNone(), x)()
+    return Combine7(self.pa, self.pb, self.pc, const(None), 
+                    const(None), const(None), const(None), x)()
 
 class Combine4(Generic[A, B, C, D, E]):
 
@@ -164,7 +164,7 @@ class Combine4(Generic[A, B, C, D, E]):
     def x(t: Tuple[A, B, C, D, None, None, None]) -> E:
       return self.abc((t[0], t[1], t[2], t[3]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    constNone(), constNone(), constNone(), x)()
+                    const(None), const(None), const(None), x)()
 
 class Combine5(Generic[A, B, C, D, E, F]):
 
@@ -177,7 +177,7 @@ class Combine5(Generic[A, B, C, D, E, F]):
     def x(t: Tuple[A, B, C, D, E, None, None]) -> F:
       return self.abc((t[0], t[1], t[2], t[3], t[4]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, constNone(), constNone(), x)()
+                    self.pe, const(None), const(None), x)()
 
 class Combine6(Generic[A, B, C, D, E, F, G]):
 
@@ -191,7 +191,7 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
     def x(t: Tuple[A, B, C, D, E, F, None]) -> G:
       return self.abc((t[0], t[1], t[2], t[3], t[4], t[5]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, self.pf, constNone(), x)()
+                    self.pe, self.pf, const(None), x)()
 
 errAcc = ListSg[Exception]()
 
