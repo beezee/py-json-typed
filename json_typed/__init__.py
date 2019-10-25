@@ -1,5 +1,5 @@
-from adt import append2, fold3, fold4, map2, Sum2, Sum3, Sum4
-from adt import F1, F2
+from adt import append2sg, fold3, fold4, map2, Sum2, Sum3, Sum4
+from adt import F1, F2, ListSg
 from typing import Callable, Dict, Generic, List, Tuple, Type, TypeVar, Union
 
 A = TypeVar('A')
@@ -143,6 +143,8 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
     return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), self.pd.run(),
                     self.pe.run(), self.pf.run(), parseNone(), x)()
 
+errAcc = ListSg[Exception]()
+
 class Combine7(Generic[A, B, C, D, E, F, G, H]):
   pa: Box[Parser[A]]
   pb: Box[Parser[B]]
@@ -161,12 +163,12 @@ class Combine7(Generic[A, B, C, D, E, F, G, H]):
     
   def __call__(self) -> Parser[H]:
     def x(j: JsonType) -> Parsed[H]:
-      fg = map2(append2(self.pf.run()(j), self.pg.run()(j)), lambda x: x)
-      efg = map2(append2(self.pe.run()(j), fg), lambda x: (x[0],) +  x[1])
-      defg = map2(append2(self.pd.run()(j), efg), lambda x: (x[0],) + x[1])
-      cdefg = map2(append2(self.pc.run()(j), defg), lambda x: (x[0],) + x[1])
-      bcdefg = map2(append2(self.pb.run()(j), cdefg), lambda x: (x[0],) + x[1])
-      abcdefg = map2(append2(self.pa.run()(j), bcdefg), lambda x: (x[0],) + x[1])
+      fg = map2(append2sg(self.pf.run()(j), self.pg.run()(j), errAcc), lambda x: x)
+      efg = map2(append2sg(self.pe.run()(j), fg, errAcc), lambda x: (x[0],) +  x[1])
+      defg = map2(append2sg(self.pd.run()(j), efg, errAcc), lambda x: (x[0],) + x[1])
+      cdefg = map2(append2sg(self.pc.run()(j), defg, errAcc), lambda x: (x[0],) + x[1])
+      bcdefg = map2(append2sg(self.pb.run()(j), cdefg, errAcc), lambda x: (x[0],) + x[1])
+      abcdefg = map2(append2sg(self.pa.run()(j), bcdefg, errAcc), lambda x: (x[0],) + x[1])
       return map2(abcdefg, self.abc.run())
     return x
 
