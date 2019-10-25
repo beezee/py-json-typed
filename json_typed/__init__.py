@@ -1,7 +1,7 @@
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
 from adt import F1, F2, F3, F4, ListSg
 import json
-from typing import Callable, Dict, Generic, List, Tuple, Type, TypeVar, Union
+from typing import Callable, Dict, Generic, List, Tuple, Type, TypeVar
 
 A = TypeVar('A')
 B = TypeVar('B')
