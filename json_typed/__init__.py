@@ -19,22 +19,6 @@ JsonType = Sum3[JsonPrimitive, 'JsonList', 'JsonDict']
 Parsed = Sum2[List[Exception], A]
 ParseFn = Callable[[JsonType], Parsed[A]]
 
-class Parser(Generic[A]):
-  
-  def __init__(self, path: List[str], run: ParseFn[A]) -> None:
-    self.path = path
-    self._run = run
-
-  def run(self, j: JsonType) -> Parsed[A]:
-    return bind2(traverse(self.path)(j), self._run)
-
-  def setPath(self, path: List[str]) -> 'Parser[A]':
-    self.path = path
-    return self
-
-  def parse(self, s: str) -> Parsed[A]:
-    return bind2(parse_json(load_json(s)), self.run)
-
 # work around mypy#731: no recursive structural types yet
 class JsonList(List[JsonType]):
     pass
@@ -69,6 +53,23 @@ def error(t: Type[A]) -> Callable[[str], List[Exception]]:
   def x(s: str) -> List[Exception]:
     return [TypeError('Expecting ' + t.__name__ + ', got ' + s)]
   return x
+
+class Parser(Generic[A]):
+  
+  def __init__(self, path: List[str], run: ParseFn[A]) -> None:
+    self.path = path
+    self._run = run
+
+  def run(self, j: JsonType) -> Parsed[A]:
+    return bind2(traverse(self.path)(j), self._run)
+
+  def setPath(self, path: List[str]) -> 'Parser[A]':
+    self.path = path
+    return self
+
+  def parse(self, s: str) -> Parsed[A]:
+    return bind2(parse_json(load_json(s)), self.run)
+
 
 def parseDict(path: List[str] = []) -> Parser[JsonDict]:
   err = error(JsonDict)
