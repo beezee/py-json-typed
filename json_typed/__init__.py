@@ -1,4 +1,4 @@
-from adt import append2sg, fold3, fold4, map2, Sum2, Sum3, Sum4
+from adt import append2sg, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
 from adt import F1, F2, ListSg
 from typing import Callable, Dict, Generic, List, Tuple, Type, TypeVar, Union
 
@@ -66,8 +66,21 @@ def parseBool() -> Parser[bool]:
   return parsePrim(bool, prim)
 
 def parseNone() -> Parser[None]:
+  (a, b, c, _) = prims(type(None)).fold
+  prim = fold4[str, int, bool, None, Parsed[None]]((a, b, c, lambda x: F2(x)))
+  err = error(type(None))
+  return parsePrim(type(None), prim)
+
+def constNone() -> Parser[None]:
   def x(j: JsonType) -> Parsed[None]:
     return F2(None)
+  return x
+
+def parseOptional(p: Parser[A]) -> Parser[Sum2[None, A]]:
+  def x(j: JsonType) -> Parsed[Sum2[None, A]]:
+    return fold2[List[Exception], A, Parsed[Sum2[None, A]]](
+      (lambda _: map2(parseNone()(j), lambda x: F1(x)),
+       lambda x: F2(F2(x))))(p(j))
   return x
 
 class Box(Generic[A]):
@@ -86,8 +99,8 @@ class Combine2(Generic[A, B, C]):
   def __call__(self) -> Parser[C]:
     def x(t: Tuple[A, B, None, None, None, None, None]) -> C:
       return self.abc.run()((t[0], t[1]))
-    return Combine7(self.pa.run(), self.pb.run(), parseNone(), parseNone(), 
-                    parseNone(), parseNone(), parseNone(), x)()
+    return Combine7(self.pa.run(), self.pb.run(), constNone(), constNone(), 
+                    constNone(), constNone(), constNone(), x)()
 
 class Combine3(Generic[A, B, C, D]):
   pa: Box[Parser[A]]
@@ -98,8 +111,8 @@ class Combine3(Generic[A, B, C, D]):
   def __call__(self) -> Parser[D]:
     def x(t: Tuple[A, B, C, None, None, None, None]) -> D:
       return self.abc.run()((t[0], t[1], t[2]))
-    return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), parseNone(), 
-                    parseNone(), parseNone(), parseNone(), x)()
+    return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), constNone(), 
+                    constNone(), constNone(), constNone(), x)()
 
 class Combine4(Generic[A, B, C, D, E]):
   pa: Box[Parser[A]]
@@ -112,7 +125,7 @@ class Combine4(Generic[A, B, C, D, E]):
     def x(t: Tuple[A, B, C, D, None, None, None]) -> E:
       return self.abc.run()((t[0], t[1], t[2], t[3]))
     return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), self.pd.run(),
-                    parseNone(), parseNone(), parseNone(), x)()
+                    constNone(), constNone(), constNone(), x)()
 
 class Combine5(Generic[A, B, C, D, E, F]):
   pa: Box[Parser[A]]
@@ -126,7 +139,7 @@ class Combine5(Generic[A, B, C, D, E, F]):
     def x(t: Tuple[A, B, C, D, E, None, None]) -> F:
       return self.abc.run()((t[0], t[1], t[2], t[3], t[4]))
     return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), self.pd.run(),
-                    self.pe.run(), parseNone(), parseNone(), x)()
+                    self.pe.run(), constNone(), constNone(), x)()
 
 class Combine6(Generic[A, B, C, D, E, F, G]):
   pa: Box[Parser[A]]
@@ -141,7 +154,7 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
     def x(t: Tuple[A, B, C, D, E, F, None]) -> G:
       return self.abc.run()((t[0], t[1], t[2], t[3], t[4], t[5]))
     return Combine7(self.pa.run(), self.pb.run(), self.pc.run(), self.pd.run(),
-                    self.pe.run(), self.pf.run(), parseNone(), x)()
+                    self.pe.run(), self.pf.run(), constNone(), x)()
 
 errAcc = ListSg[Exception]()
 
