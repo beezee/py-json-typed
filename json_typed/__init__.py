@@ -1,5 +1,5 @@
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
-from adt import F1, F2, F3, F4, Fn, ListSg
+from adt import Compose, F1, F2, F3, F4, Fn, ListSg
 import json
 from typing import Callable, Dict, Generic, List, NamedTuple, Tuple, Type, TypeVar
 
@@ -53,9 +53,8 @@ def parse_json(x: any) -> PreParsed[JsonType]: # type: ignore
     return F1(F2(e))
 
 def error(t: Type[A]) -> Callable[[str], PreParseError]:
-  def x(s: str) -> PreParseError:
-    return F2(TypeError('Expecting ' + t.__name__ + ', got ' + s))
-  return x
+  return Fn[str, PreParseError](
+    lambda s: F2(TypeError('Expecting ' + t.__name__ + ', got ' + s)))
 
 class toParsed(Generic[A]):
   def __init__(self, path: List[str]) -> None:
@@ -81,14 +80,15 @@ class Parser(Generic[A]):
     self._run = run
 
   def run(self, j: JsonType) -> Parsed[A]:
-    return bind2(traverse(self.path)(j), lambda x: toParsed[A](self.path)(self._run(x)))
+    return bind2(traverse(self.path)(j), Compose(toParsed[A](self.path), self._run))
 
   def setPath(self, path: List[str]) -> 'Parser[A]':
     self.path = path
     return self
 
   def parse(self, s: str) -> Parsed[A]:
-    return bind2(toParsed[JsonType](self.path)(parse_json(load_json(s))), self.run)
+    return bind2(Compose(toParsed[JsonType](self.path),
+                 Compose(parse_json, load_json))(s), self.run)
 
 
 def parseDict() -> ParseFn[JsonDict]:
@@ -144,13 +144,12 @@ def const(a: A) -> Parser[A]:
   return Parser([], parseConst(a))
 
 def parseOptional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
-  def x(j: JsonType) -> PreParsed[Sum2[None, A]]:
-    return fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
+  return Fn[JsonType, PreParsed[Sum2[None, A]]](lambda j:
+    fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
       (lambda x: fold2[PreParseError, None, PreParsed[Sum2[None, A]]](
           (lambda _: F1(x),
            lambda x: F2(F1(x))))(parseNone()(j)),
-       lambda x: F2(F2(x))))(p(j))
-  return x
+       lambda x: F2(F2(x))))(p(j)))
 
 class Combine2(Generic[A, B, C]):
 
@@ -158,10 +157,10 @@ class Combine2(Generic[A, B, C]):
     (self.pa, self.pb, self.abc) = (pa, pb, abc)
 
   def __call__(self) -> Parser[C]:
-    def x(t: Tuple[A, B, None, None, None, None, None]) -> C:
-      return self.abc((t[0], t[1]))
     return Combine7(self.pa, self.pb, const(None), const(None), 
-                    const(None), const(None), const(None), x)()
+                    const(None), const(None), const(None),
+                    Fn[Tuple[A, B, None, None, None, None, None], C](
+                      lambda t: self.abc((t[0], t[1]))))()
 
 class Combine3(Generic[A, B, C, D]):
 
@@ -170,10 +169,10 @@ class Combine3(Generic[A, B, C, D]):
     (self.pa, self.pb, self.pc, self.abc) = (pa, pb, pc, abc)
 
   def __call__(self) -> Parser[D]:
-    def x(t: Tuple[A, B, C, None, None, None, None]) -> D:
-      return self.abc((t[0], t[1], t[2]))
     return Combine7(self.pa, self.pb, self.pc, const(None), 
-                    const(None), const(None), const(None), x)()
+                    const(None), const(None), const(None),
+                    Fn[Tuple[A, B, C, None, None, None, None], D](
+                      lambda t: self.abc((t[0], t[1], t[2]))))()
 
 class Combine4(Generic[A, B, C, D, E]):
 
@@ -182,10 +181,10 @@ class Combine4(Generic[A, B, C, D, E]):
     (self.pa, self.pb, self.pc, self.pd, self.abc) = (pa, pb, pc, pd, abc)
 
   def __call__(self) -> Parser[E]:
-    def x(t: Tuple[A, B, C, D, None, None, None]) -> E:
-      return self.abc((t[0], t[1], t[2], t[3]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    const(None), const(None), const(None), x)()
+                    const(None), const(None), const(None),
+                    Fn[Tuple[A, B, C, D, None, None, None], E](
+                      lambda t: self.abc((t[0], t[1], t[2], t[3]))))()
 
 class Combine5(Generic[A, B, C, D, E, F]):
 
@@ -195,10 +194,10 @@ class Combine5(Generic[A, B, C, D, E, F]):
     (self.pa, self.pb, self.pc, self.pd, self.pe, self.abc) = (pa, pb, pc, pd, pe, abc)
 
   def __call__(self) -> Parser[F]:
-    def x(t: Tuple[A, B, C, D, E, None, None]) -> F:
-      return self.abc((t[0], t[1], t[2], t[3], t[4]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, const(None), const(None), x)()
+                    self.pe, const(None), const(None),
+                    Fn[Tuple[A, B, C, D, E, None, None], F](
+                      lambda t: self.abc((t[0], t[1], t[2], t[3], t[4]))))()
 
 class Combine6(Generic[A, B, C, D, E, F, G]):
 
@@ -209,10 +208,10 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
       self.pe, self.pf, self.abc) = (pa, pb, pc, pd, pe, pf, abc)
 
   def __call__(self) -> Parser[G]:
-    def x(t: Tuple[A, B, C, D, E, F, None]) -> G:
-      return self.abc((t[0], t[1], t[2], t[3], t[4], t[5]))
     return Combine7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, self.pf, const(None), x)()
+                    self.pe, self.pf, const(None),
+                    Fn[Tuple[A, B, C, D, E, F, None], G](
+                      lambda t: self.abc((t[0], t[1], t[2], t[3], t[4], t[5]))))()
 
 errAcc = ListSg[ParseError]()
 
