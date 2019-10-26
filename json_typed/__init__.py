@@ -76,18 +76,17 @@ class toPreParsed(Generic[A]):
 class Parser(Generic[A]):
   
   def __init__(self, path: List[str], run: ParseFn[A]) -> None:
-    self.path = path
+    self._path = path
     self._run = run
 
   def run(self, j: JsonType) -> Parsed[A]:
-    return bind2(traverse(self.path)(j), Compose(toParsed[A](self.path), self._run))
+    return bind2(traverse(self._path)(j), Compose(toParsed[A](self._path), self._run))
 
   def setPath(self, path: List[str]) -> 'Parser[A]':
-    self.path = path
-    return self
+    return Parser(path, self._run)
 
   def parse(self, s: str) -> Parsed[A]:
-    return bind2(Compose(toParsed[JsonType](self.path),
+    return bind2(Compose(toParsed[JsonType](self._path),
                  Compose(parse_json, load_json))(s), self.run)
 
 
