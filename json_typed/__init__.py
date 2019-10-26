@@ -1,7 +1,7 @@
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
-from adt import F1, F2, F3, F4, ListSg
+from adt import F1, F2, F3, F4, Fn, ListSg
 import json
-from typing import Callable, Dict, Generic, List, Tuple, Type, TypeVar
+from typing import Callable, Dict, Generic, List, NamedTuple, Tuple, Type, TypeVar
 
 A = TypeVar('A')
 B = TypeVar('B')
@@ -16,8 +16,11 @@ H = TypeVar('H')
 JsonPrimitive = Sum4[str, int, bool, None]
 JsonType = Sum3[JsonPrimitive, 'JsonList', 'JsonDict']
 
-Parsed = Sum2[List[Exception], A]
-ParseFn = Callable[[JsonType], Parsed[A]]
+ParseError = NamedTuple('ParseError', [('path', List[str]), ('error', Exception)])
+Parsed = Sum2[List[ParseError], A]
+PreParseError = Sum2[List[ParseError], Exception]
+PreParsed = Sum2[PreParseError, A]
+ParseFn = Callable[[JsonType], PreParsed[A]]
 
 # work around mypy#731: no recursive structural types yet
 class JsonList(List[JsonType]):
@@ -29,7 +32,7 @@ class JsonDict(Dict[str, JsonType]):
 def load_json(j: str) -> any: # type: ignore
   return json.loads(j) # type: ignore
 
-def parse_json(x: any) -> Parsed[JsonType]: # type: ignore
+def parse_json(x: any) -> PreParsed[JsonType]: # type: ignore
   try:
     if isinstance(x, dict): # type: ignore
       return F2(F3(JsonDict(x)))
@@ -45,14 +48,31 @@ def parse_json(x: any) -> Parsed[JsonType]: # type: ignore
       elif isinstance(x, type(None)): # type: ignore
         return F2(F1(F4(x)))
       else:
-        return F1([Exception('Invalid JSON')])
+        return F1(F2(Exception('Invalid JSON')))
   except Exception as e:
-    return F1([e])
+    return F1(F2(e))
 
-def error(t: Type[A]) -> Callable[[str], List[Exception]]:
-  def x(s: str) -> List[Exception]:
-    return [TypeError('Expecting ' + t.__name__ + ', got ' + s)]
+def error(t: Type[A]) -> Callable[[str], PreParseError]:
+  def x(s: str) -> PreParseError:
+    return F2(TypeError('Expecting ' + t.__name__ + ', got ' + s))
   return x
+
+class toParsed(Generic[A]):
+  def __init__(self, path: List[str]) -> None:
+    self.path = path
+    
+  def __call__(self, a: PreParsed[A]) -> Parsed[A]:
+    return fold2[PreParseError, A, Parsed[A]](
+      (fold2[List[ParseError], Exception, Parsed[A]](
+        (lambda x: F1(list(map(Fn[ParseError, ParseError](
+          lambda y: y._replace(path=self.path+y.path)), x))),
+         lambda x: F1([ParseError(self.path, x)]))),
+       lambda x: F2(x)))(a)
+
+class toPreParsed(Generic[A]):
+  def __call__(self, a: Parsed[A]) -> PreParsed[A]:
+    return fold2[List[ParseError], A, PreParsed[A]](
+      (lambda x: F1(F1(x)), lambda x: F2(x)))(a)
 
 class Parser(Generic[A]):
   
@@ -61,26 +81,26 @@ class Parser(Generic[A]):
     self._run = run
 
   def run(self, j: JsonType) -> Parsed[A]:
-    return bind2(traverse(self.path)(j), self._run)
+    return bind2(traverse(self.path)(j), lambda x: toParsed[A](self.path)(self._run(x)))
 
   def setPath(self, path: List[str]) -> 'Parser[A]':
     self.path = path
     return self
 
   def parse(self, s: str) -> Parsed[A]:
-    return bind2(parse_json(load_json(s)), self.run)
+    return bind2(toParsed[JsonType](self.path)(parse_json(load_json(s))), self.run)
 
 
 def parseDict() -> ParseFn[JsonDict]:
   err = error(JsonDict)
-  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', Parsed[A]](
+  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[A]](
     (lambda x: F1(err('JsonPrimitive')),
      lambda x: F1(err('List')),
      lambda x: F2(x)))
 
-def prims(t: Type[A]) -> fold4[str, int, bool, None, Parsed[A]]:
+def prims(t: Type[A]) -> fold4[str, int, bool, None, PreParsed[A]]:
   err = error(t)
-  return fold4[str, int, bool, None, Parsed[A]](
+  return fold4[str, int, bool, None, PreParsed[A]](
     (lambda x: F1(err('str')),
     lambda x: F1(err('int')),
     lambda x: F1(err('bool')),
@@ -88,35 +108,35 @@ def prims(t: Type[A]) -> fold4[str, int, bool, None, Parsed[A]]:
 
 
 def parsePrim(t: Type[A], 
-           f: fold4[str, int, bool, None, Parsed[A]]) -> ParseFn[A]:
+           f: fold4[str, int, bool, None, PreParsed[A]]) -> ParseFn[A]:
   err = error(t)
-  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', Parsed[B]](
+  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[B]](
     (f,
      lambda x: F1(err('List')),
      lambda x: F1(err('Dict'))))
 
 def parseStr() -> ParseFn[str]:
   (_, b, c, d) = prims(str).fold
-  prim = fold4[str, int, bool, None, Parsed[str]]((lambda x: F2(x), b, c, d))
+  prim = fold4[str, int, bool, None, PreParsed[str]]((lambda x: F2(x), b, c, d))
   return parsePrim(str, prim)
 
 def parseInt() -> ParseFn[int]:
   (a, _, c, d) = prims(int).fold
-  prim = fold4[str, int, bool, None, Parsed[int]]((a, lambda x: F2(x), c, d))
+  prim = fold4[str, int, bool, None, PreParsed[int]]((a, lambda x: F2(x), c, d))
   return parsePrim(int, prim)
 
 def parseBool() -> ParseFn[bool]:
   (a, b, _, d) = prims(bool).fold
-  prim = fold4[str, int, bool, None, Parsed[bool]]((a, b, lambda x: F2(x), d))
+  prim = fold4[str, int, bool, None, PreParsed[bool]]((a, b, lambda x: F2(x), d))
   return parsePrim(bool, prim)
 
 def parseNone() -> ParseFn[None]:
   (a, b, c, _) = prims(type(None)).fold
-  prim = fold4[str, int, bool, None, Parsed[None]]((a, b, c, lambda x: F2(x)))
+  prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
   return parsePrim(type(None), prim)
 
 def parseConst(a: A) -> ParseFn[A]:
-  def x(j: JsonType) -> Parsed[A]:
+  def x(j: JsonType) -> PreParsed[A]:
     return F2(a)
   return x
 
@@ -124,9 +144,9 @@ def const(a: A) -> Parser[A]:
   return Parser([], parseConst(a))
 
 def parseOptional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
-  def x(j: JsonType) -> Parsed[Sum2[None, A]]:
-    return fold2[List[Exception], A, Parsed[Sum2[None, A]]](
-      (lambda x: fold2[List[Exception], None, Parsed[Sum2[None, A]]](
+  def x(j: JsonType) -> PreParsed[Sum2[None, A]]:
+    return fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
+      (lambda x: fold2[PreParseError, None, PreParsed[Sum2[None, A]]](
           (lambda _: F1(x),
            lambda x: F2(F1(x))))(parseNone()(j)),
        lambda x: F2(F2(x))))(p(j))
@@ -194,7 +214,7 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
     return Combine7(self.pa, self.pb, self.pc, self.pd,
                     self.pe, self.pf, const(None), x)()
 
-errAcc = ListSg[Exception]()
+errAcc = ListSg[ParseError]()
 
 class Combine7(Generic[A, B, C, D, E, F, G, H]):
 
@@ -205,17 +225,17 @@ class Combine7(Generic[A, B, C, D, E, F, G, H]):
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
     
   def __call__(self) -> Parser[H]:
-    def x(j: JsonType) -> Parsed[H]:
+    def x(j: JsonType) -> PreParsed[H]:
       fg = map2(append2sg(self.pf.run(j), self.pg.run(j), errAcc), lambda x: x)
       efg = map2(append2sg(self.pe.run(j), fg, errAcc), lambda x: (x[0],) +  x[1])
       defg = map2(append2sg(self.pd.run(j), efg, errAcc), lambda x: (x[0],) + x[1])
       cdefg = map2(append2sg(self.pc.run(j), defg, errAcc), lambda x: (x[0],) + x[1])
       bcdefg = map2(append2sg(self.pb.run(j), cdefg, errAcc), lambda x: (x[0],) + x[1])
       abcdefg = map2(append2sg(self.pa.run(j), bcdefg, errAcc), lambda x: (x[0],) + x[1])
-      return map2(abcdefg, self.abc)
+      return toPreParsed[H]()(map2(abcdefg, self.abc))
     return Parser([], x)
 
-def traverse(k: List[str]) -> ParseFn[JsonType]:
+def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
   def x(j: JsonType) -> Parsed[JsonType]:
     if len(k) == 0:
       return F2(j)
@@ -223,8 +243,10 @@ def traverse(k: List[str]) -> ParseFn[JsonType]:
       d = parseDict()(j)
       try:
         aj = map2(d, lambda y: y.get(k[0])) # type: ignore
-        pj = bind2(aj, parse_json) # type: ignore
-        return bind2(pj, traverse(k[1:]))
+        ntk = tk
+        ntk.append(k[0])
+        pj = toParsed[JsonType](ntk)(bind2(aj, parse_json)) # type: ignore
+        return bind2(pj, traverse(k[1:], ntk))
       except Exception as e:
-        return F1([e])
+        return F1([ParseError(ntk, e)])
   return x
