@@ -1,6 +1,7 @@
-from adt import Sum2
+from adt import Id, Sum2
 from dataclasses import dataclass
 from json_typed import Combine2, parseStr, parseInt, parseOptional, Parser
+from typing import Tuple
 
 foo = Parser(['foo'], parseOptional(parseStr()))
 bar = Parser(['baz'], parseStr())
@@ -12,7 +13,7 @@ class Foo:
   bar: str
   quux: int
 
-fbq = Combine2(Combine2(foo, bar, lambda x: x)().setPath(['foobar']), quux,
+fbq = Combine2(Combine2(foo, bar, Id[Tuple[Sum2[None, str], str]]())().setPath(['foobar']), quux,
   lambda t: Foo(t[0][0], t[0][1], t[1]))
 
 if __name__ == '__main__':
