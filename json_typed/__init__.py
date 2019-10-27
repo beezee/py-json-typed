@@ -1,5 +1,6 @@
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
 from adt import Compose, Id, F1, F2, F3, F4, Fn, KeepLeft, ListSg, ProductSg, Semigroup
+from dataclasses import dataclass
 from functools import reduce
 import json
 from typing import Callable, Dict, Generic, List, NamedTuple, Tuple, Type, TypeVar
@@ -17,9 +18,24 @@ H = TypeVar('H')
 JsonPrimitive = Sum4[str, int, bool, None]
 JsonType = Sum3[JsonPrimitive, 'JsonList', 'JsonDict']
 
-ParseError = NamedTuple('ParseError', [('path', List[str]), ('error', Exception)])
+class ParseException(Exception): pass
+
+@dataclass
+class ParseTypeError(ParseException):
+  expected: str
+  encountered: str
+
+@dataclass
+class UnknownParseError(ParseException):
+  origin: Exception
+
+@dataclass
+class CustomParseError(ParseException):
+  aux: Dict[str, str]
+
+ParseError = NamedTuple('ParseError', [('path', List[str]), ('error', ParseException)])
 Parsed = Sum2[List[ParseError], A]
-PreParseError = Sum2[List[ParseError], Exception]
+PreParseError = Sum2[List[ParseError], ParseException]
 PreParsed = Sum2[PreParseError, A]
 ParseFn = Callable[[JsonType], PreParsed[A]]
 
@@ -49,13 +65,13 @@ def parse_json(x: any) -> PreParsed[JsonType]: # type: ignore
       elif isinstance(x, type(None)): # type: ignore
         return F2(F1(F4(x)))
       else:
-        return F1(F2(Exception('Invalid JSON')))
+        return F1(F2(ParseException))
   except Exception as e:
-    return F1(F2(e))
+    return F1(F2(UnknownParseError(e)))
 
 def error(t: Type[A]) -> Callable[[str], PreParseError]:
   return Fn[str, PreParseError](
-    lambda s: F2(TypeError('Expecting ' + t.__name__ + ', got ' + s)))
+    lambda s: F2(ParseTypeError(t.__name__, s)))
 
 pathConcat = ListSg[str]()
 class toParsed(Generic[A]):
@@ -64,7 +80,7 @@ class toParsed(Generic[A]):
     
   def __call__(self, a: PreParsed[A]) -> Parsed[A]:
     return fold2[PreParseError, A, Parsed[A]](
-      (fold2[List[ParseError], Exception, Parsed[A]](
+      (fold2[List[ParseError], ParseException, Parsed[A]](
         (lambda x: F1(list(map(Fn[ParseError, ParseError](
           lambda y: y._replace(path=self.sg.append(self.path, y.path))), x))),
          lambda x: F1([ParseError(self.path, x)]))),
@@ -278,5 +294,5 @@ def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[Js
         pj = toParsed[JsonType](ntk)(bind2(aj, parse_json)) # type: ignore
         return bind2(pj, traverse(k[1:], ntk))
       except Exception as e:
-        return F1([ParseError(ntk, e)])
+        return F1([ParseError(ntk, UnknownParseError(e))])
   return x
