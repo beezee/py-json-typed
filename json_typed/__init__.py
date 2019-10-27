@@ -101,7 +101,10 @@ class Parser(Generic[A]):
     return bind2(traverse(self._path)(j), Compose(toParsed[A](self._path), self._run))
 
   def setPath(self, path: List[str]) -> 'Parser[A]':
-    return Parser(path, self._run)
+    return self.mapPath(lambda _: path)
+
+  def mapPath(self, update: Callable[[List[str]], List[str]]) -> 'Parser[A]':
+    return Parser(update(self._path), self._run)
 
   def parse(self, s: str) -> Parsed[A]:
     return bind2(Compose(toParsed[JsonType](self._path),
