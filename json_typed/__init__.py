@@ -230,10 +230,9 @@ class ExtendParse(Generic[A, B]):
     (self._p, self._c) = (p, c)
 
   def __call__(self, j: JsonType) -> PreParsed[B]:
-    return Fn[JsonType, PreParsed[B]](
-      lambda x: bind2(self._p(x), 
-        Compose(fold2[CustomParseError, B, PreParsed[B]](
-          (lambda x: F1(F2(x)), lambda x: F2(x))), self._c)))(j)
+    return bind2(self._p(j), 
+      Compose(fold2[CustomParseError, B, PreParsed[B]](
+        (lambda x: F1(F2(x)), lambda x: F2(x))), self._c))
 
 err_acc = ListSg[ParseError]()
 
