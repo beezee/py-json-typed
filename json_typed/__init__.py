@@ -38,7 +38,16 @@ ParseError = NamedTuple('ParseError', [('path', List[str]), ('error', ParseExcep
 Parsed = Sum2[List[ParseError], A]
 PreParseError = Sum2[List[ParseError], ParseException]
 PreParsed = Sum2[PreParseError, A]
-ParseFn = Callable[[JsonType], PreParsed[A]]
+ParseFn = Callable[[List[str], JsonType], PreParsed[A]]
+
+# TODO - this is a generic arrow operation, used to hide library implementation
+# consider moving to topoy and implementing in terms of
+class Parse(Generic[E, A, B]):
+  def __init__(self, fn: Callable[[A], Sum2[E, B]]) -> None:
+    self._fn = fn
+
+  def __call__(self, _: List[str], j: A) -> Sum2[E, B]:
+    return self._fn(j)
 
 # work around mypy#731: no recursive structural types yet
 class JsonList(List[JsonType]):
@@ -102,7 +111,8 @@ class Parser(Generic[A]):
     self._run = run
 
   def run(self, j: JsonType) -> Parsed[A]: 
-    return bind2(traverse(self._path)(j), Compose(ToParsed[A](self._path), self._run))
+    return bind2(traverse(self._path)(j), Compose(ToParsed[A](self._path), 
+      Fn[JsonType, PreParsed[A]](lambda x: self._run(self._path, x))))
 
   def set_path(self, path: List[str]) -> 'Parser[A]':
     return self.map_path(lambda _: path)
@@ -136,9 +146,10 @@ class ListParser:
                 (lambda x: (x, []),
                  lambda x: ([], [x])))(
                   ToParsed[A](self._path + [str(acc[0])], append_path)(
-                    bind2(parse_json(j), self._run_list)))))
+                    bind2(parse_json(j), 
+                    Fn[JsonType, PreParsed[A]](lambda x: self._run_list(self._path, x)))))))
         return self.bind(reduce(x, l, (0, Id[ListResult[A]]()(([], []))))[1])
-      return bind2(Parser(self._path, parse_list()).run(j), reducer)
+      return bind2(Parser(self._path, parse_list).run(j), reducer)
 
   class FailFast(Generic[A], _Base[A, List[A]]):
 
@@ -150,19 +161,19 @@ class ListParser:
     def bind(self, r: ListResult[A]) -> Parsed[ListResult[A]]:
       return F1(r[0]) if (len(r[1]) == 0 and not (len(r[0]) == 0)) else F2(r)
 
-def parse_dict() -> ParseFn[JsonDict]:
+def parse_dict(_: List[str], j: JsonType) -> PreParsed[JsonDict]:
   err = error(JsonDict)
   return fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[JsonDict]](
     (lambda _: F1(err('JsonPrimitive')),
      lambda _: F1(err('List')),
-     lambda x: F2(x)))
+     lambda x: F2(x)))(j)
 
-def parse_list() -> ParseFn[JsonList]:
+def parse_list(_: List[str], j: JsonType) -> PreParsed[JsonList]:
   err = error(JsonList)
   return fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[JsonList]](
     (lambda _: F1(err('JsonPrimitive')),
      lambda x: F2(x),
-     lambda _: F1(err('Dict'))))
+     lambda _: F1(err('Dict'))))(j)
 
 def prims(t: Type[A]) -> fold4[str, int, bool, None, PreParsed[A]]:
   err = error(t)
@@ -176,33 +187,33 @@ def prims(t: Type[A]) -> fold4[str, int, bool, None, PreParsed[A]]:
 def parse_prim(t: Type[A], 
            f: fold4[str, int, bool, None, PreParsed[A]]) -> ParseFn[A]:
   err = error(t)
-  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[B]](
+  return Parse(fold3[JsonPrimitive, 'JsonList', 'JsonDict', PreParsed[B]](
     (f,
      lambda x: F1(err('List')),
-     lambda x: F1(err('Dict'))))
+     lambda x: F1(err('Dict')))))
 
-def parse_str(j: JsonType) -> PreParsed[str]:
+def parse_str(p: List[str], j: JsonType) -> PreParsed[str]:
   (_, b, c, d) = prims(str).fold
   prim = fold4[str, int, bool, None, PreParsed[str]]((lambda x: F2(x), b, c, d))
-  return parse_prim(str, prim)(j)
+  return parse_prim(str, prim)(p, j)
 
-def parse_int(j: JsonType) -> PreParsed[int]:
+def parse_int(p: List[str], j: JsonType) -> PreParsed[int]:
   (a, _, c, d) = prims(int).fold
   prim = fold4[str, int, bool, None, PreParsed[int]]((a, lambda x: F2(x), c, d))
-  return parse_prim(int, prim)(j)
+  return parse_prim(int, prim)(p, j)
 
-def parse_bool(j: JsonType) -> PreParsed[bool]:
+def parse_bool(p: List[str], j: JsonType) -> PreParsed[bool]:
   (a, b, _, d) = prims(bool).fold
   prim = fold4[str, int, bool, None, PreParsed[bool]]((a, b, lambda x: F2(x), d))
-  return parse_prim(bool, prim)(j)
+  return parse_prim(bool, prim)(p, j)
 
-def parse_none(j: JsonType) -> PreParsed[None]:
+def parse_none(p: List[str], j: JsonType) -> PreParsed[None]:
   (a, b, c, _) = prims(type(None)).fold
   prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
-  return parse_prim(type(None), prim)(j)
+  return parse_prim(type(None), prim)(p, j)
 
 def parse_const(a: A) -> ParseFn[A]:
-  def x(j: JsonType) -> PreParsed[A]:
+  def x(_: List[str], j: JsonType) -> PreParsed[A]:
     return F2(a)
   return x
 
@@ -210,23 +221,25 @@ def const(a: A) -> Parser[A]:
   return Parser([], parse_const(a))
 
 def parse_optional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
-  return Fn[JsonType, PreParsed[Sum2[None, A]]](lambda j:
-    fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
+  def x(path: List[str], j: JsonType) -> PreParsed[Sum2[None, A]]:
+    return fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
       (lambda x: fold2[PreParseError, None, PreParsed[Sum2[None, A]]](
           (lambda _: F1(x),
-           lambda x: F2(F1(x))))(parse_none(j)),
-       lambda x: F2(F2(x))))(p(j)))
+           lambda x: F2(F1(x))))(parse_none(path, j)),
+       lambda x: F2(F2(x))))(p(path, j))
+  return x
 
 class ExtendParse(Generic[A, B]):
   
-  def __init__(self, p: ParseFn[A], c: Callable[[A], Sum2[CustomParseError, B]]) -> None:
+  def __init__(self, p: ParseFn[A], 
+               c: Callable[[List[str], A], Sum2[CustomParseError, B]]) -> None:
     (self._p, self._c) = (p, c)
 
-  def __call__(self, j: JsonType) -> PreParsed[B]:
-    return Fn[JsonType, PreParsed[B]](
-      lambda x: bind2(self._p(x), 
-        Compose(fold2[CustomParseError, B, PreParsed[B]](
-          (lambda x: F1(F2(x)), lambda x: F2(x))), self._c)))(j)
+  def __call__(self, p: List[str], j: JsonType) -> PreParsed[B]:
+    return bind2(self._p(p, j), 
+      Compose(fold2[CustomParseError, B, PreParsed[B]](
+        (lambda x: F1(F2(x)), lambda x: F2(x))), 
+        Fn[A, Sum2[CustomParseError, B]](lambda x: self._c(p, x))))
 
 err_acc = ListSg[ParseError]()
 
@@ -237,7 +250,7 @@ class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
                abc: Callable[[Tuple[A, B, C, D, E, F, G]], H]) -> None:
     (self.pa, self.pb, self.pc, self.pd) = (pa, pb, pc, pd)
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
-    def run(j: JsonType) -> PreParsed[H]:
+    def run(_: List[str], j: JsonType) -> PreParsed[H]:
       fg = map2(append2sg(self.pf.run(j), self.pg.run(j), err_acc), lambda x: x)
       efg = map2(append2sg(self.pe.run(j), fg, err_acc), lambda x: (x[0],) +  x[1])
       defg = map2(append2sg(self.pd.run(j), efg, err_acc), lambda x: (x[0],) + x[1])
@@ -306,7 +319,7 @@ def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[Js
     if len(k) == 0:
       return F2(j)
     else:
-      d = parse_dict()(j)
+      d = parse_dict(k, j)
       try:
         aj = map2(d, lambda y: y.get(k[0])) # type: ignore
         ntk = tk
