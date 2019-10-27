@@ -165,25 +165,25 @@ def parsePrim(t: Type[A],
      lambda x: F1(err('List')),
      lambda x: F1(err('Dict'))))
 
-def parseStr() -> ParseFn[str]:
+def parseStr(j: JsonType) -> PreParsed[str]:
   (_, b, c, d) = prims(str).fold
   prim = fold4[str, int, bool, None, PreParsed[str]]((lambda x: F2(x), b, c, d))
-  return parsePrim(str, prim)
+  return parsePrim(str, prim)(j)
 
-def parseInt() -> ParseFn[int]:
+def parseInt(j: JsonType) -> PreParsed[int]:
   (a, _, c, d) = prims(int).fold
   prim = fold4[str, int, bool, None, PreParsed[int]]((a, lambda x: F2(x), c, d))
-  return parsePrim(int, prim)
+  return parsePrim(int, prim)(j)
 
-def parseBool() -> ParseFn[bool]:
+def parseBool(j: JsonType) -> PreParsed[bool]:
   (a, b, _, d) = prims(bool).fold
   prim = fold4[str, int, bool, None, PreParsed[bool]]((a, b, lambda x: F2(x), d))
-  return parsePrim(bool, prim)
+  return parsePrim(bool, prim)(j)
 
-def parseNone() -> ParseFn[None]:
+def parseNone(j: JsonType) -> PreParsed[None]:
   (a, b, c, _) = prims(type(None)).fold
   prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
-  return parsePrim(type(None), prim)
+  return parsePrim(type(None), prim)(j)
 
 def parseConst(a: A) -> ParseFn[A]:
   def x(j: JsonType) -> PreParsed[A]:
@@ -198,7 +198,7 @@ def parseOptional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
     fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
       (lambda x: fold2[PreParseError, None, PreParsed[Sum2[None, A]]](
           (lambda _: F1(x),
-           lambda x: F2(F1(x))))(parseNone()(j)),
+           lambda x: F2(F1(x))))(parseNone(j)),
        lambda x: F2(F2(x))))(p(j)))
 
 class extendParse(Generic[A, B]):
@@ -212,91 +212,16 @@ class extendParse(Generic[A, B]):
         Compose(fold2[CustomParseError, B, PreParsed[B]](
           (lambda x: F1(F2(x)), lambda x: F2(x))), self._c)))(j)
 
-class Parse1(Generic[A, B]):
-
-  def __init__(self, pa: Parser[A], ab: Callable[[A], B]) -> None:
-    (self.pa, self.ab) = (pa, ab)
-
-  def __call__(self) -> Parser[B]:
-    return Parse7(self.pa, const(None), const(None), const(None), 
-                    const(None), const(None), const(None),
-                    Fn[Tuple[A, None, None, None, None, None, None], B](
-                      lambda t: self.ab(t[0])))()
-
-class Parse2(Generic[A, B, C]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
-    (self.pa, self.pb, self.abc) = (pa, pb, abc)
-
-  def __call__(self) -> Parser[C]:
-    return Parse7(self.pa, self.pb, const(None), const(None), 
-                    const(None), const(None), const(None),
-                    Fn[Tuple[A, B, None, None, None, None, None], C](
-                      lambda t: self.abc((t[0], t[1]))))()
-
-class Parse3(Generic[A, B, C, D]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               abc: Callable[[Tuple[A, B, C]], D]) -> None:
-    (self.pa, self.pb, self.pc, self.abc) = (pa, pb, pc, abc)
-
-  def __call__(self) -> Parser[D]:
-    return Parse7(self.pa, self.pb, self.pc, const(None), 
-                    const(None), const(None), const(None),
-                    Fn[Tuple[A, B, C, None, None, None, None], D](
-                      lambda t: self.abc((t[0], t[1], t[2]))))()
-
-class Parse4(Generic[A, B, C, D, E]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               pd: Parser[D], abc: Callable[[Tuple[A, B, C, D]], E]) -> None:
-    (self.pa, self.pb, self.pc, self.pd, self.abc) = (pa, pb, pc, pd, abc)
-
-  def __call__(self) -> Parser[E]:
-    return Parse7(self.pa, self.pb, self.pc, self.pd,
-                    const(None), const(None), const(None),
-                    Fn[Tuple[A, B, C, D, None, None, None], E](
-                      lambda t: self.abc((t[0], t[1], t[2], t[3]))))()
-
-class Parse5(Generic[A, B, C, D, E, F]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               pd: Parser[D], pe: Parser[E],
-               abc: Callable[[Tuple[A, B, C, D, E]], F]) -> None:
-    (self.pa, self.pb, self.pc, self.pd, self.pe, self.abc) = (pa, pb, pc, pd, pe, abc)
-
-  def __call__(self) -> Parser[F]:
-    return Parse7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, const(None), const(None),
-                    Fn[Tuple[A, B, C, D, E, None, None], F](
-                      lambda t: self.abc((t[0], t[1], t[2], t[3], t[4]))))()
-
-class Parse6(Generic[A, B, C, D, E, F, G]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               pd: Parser[D], pe: Parser[E], pf: Parser[F],
-               abc: Callable[[Tuple[A, B, C, D, E, F]], G]) -> None:
-    (self.pa, self.pb, self.pc, self.pd, 
-      self.pe, self.pf, self.abc) = (pa, pb, pc, pd, pe, pf, abc)
-
-  def __call__(self) -> Parser[G]:
-    return Parse7(self.pa, self.pb, self.pc, self.pd,
-                    self.pe, self.pf, const(None),
-                    Fn[Tuple[A, B, C, D, E, F, None], G](
-                      lambda t: self.abc((t[0], t[1], t[2], t[3], t[4], t[5]))))()
-
 errAcc = ListSg[ParseError]()
 
-class Parse7(Generic[A, B, C, D, E, F, G, H]):
+class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F], pg: Parser[G],
                abc: Callable[[Tuple[A, B, C, D, E, F, G]], H]) -> None:
     (self.pa, self.pb, self.pc, self.pd) = (pa, pb, pc, pd)
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
-    
-  def __call__(self) -> Parser[H]:
-    def x(j: JsonType) -> PreParsed[H]:
+    def run(j: JsonType) -> PreParsed[H]:
       fg = map2(append2sg(self.pf.run(j), self.pg.run(j), errAcc), lambda x: x)
       efg = map2(append2sg(self.pe.run(j), fg, errAcc), lambda x: (x[0],) +  x[1])
       defg = map2(append2sg(self.pd.run(j), efg, errAcc), lambda x: (x[0],) + x[1])
@@ -304,7 +229,61 @@ class Parse7(Generic[A, B, C, D, E, F, G, H]):
       bcdefg = map2(append2sg(self.pb.run(j), cdefg, errAcc), lambda x: (x[0],) + x[1])
       abcdefg = map2(append2sg(self.pa.run(j), bcdefg, errAcc), lambda x: (x[0],) + x[1])
       return toPreParsed[H]()(map2(abcdefg, self.abc))
-    return Parser([], x)
+    self._run = run
+    self._path = []
+
+class Parse1(Generic[A, B], Parse7[A, None, None, None, None, None, None, B]):
+
+  def __init__(self, pa: Parser[A], ab: Callable[[A], B]) -> None:
+    super().__init__(pa, const(None), const(None), const(None), 
+                   const(None), const(None), const(None), 
+                   Fn[Tuple[A, None, None, None, None, None, None], B](
+                    lambda t: ab(t[0])))
+
+class Parse2(Generic[A, B, C], Parse7[A, B, None, None, None, None, None, C]):
+
+  def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
+    super().__init__(pa, pb, const(None), const(None), 
+                   const(None), const(None), const(None), 
+                   Fn[Tuple[A, B, None, None, None, None, None], C](
+                    lambda t: abc((t[0], t[1]))))
+
+class Parse3(Generic[A, B, C, D], Parse7[A, B, C, None, None, None, None, D]):
+
+  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
+               abc: Callable[[Tuple[A, B, C]], D]) -> None:
+    super().__init__(pa, pb, pc, const(None),
+                   const(None), const(None), const(None), 
+                   Fn[Tuple[A, B, C, None, None, None, None], D](
+                    lambda t: abc((t[0], t[1], t[2]))))
+
+class Parse4(Generic[A, B, C, D, E], Parse7[A, B, C, D, None, None, None, E]):
+
+  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
+               pd: Parser[D], abc: Callable[[Tuple[A, B, C, D]], E]) -> None:
+    super().__init__(pa, pb, pc, pd,
+                   const(None), const(None), const(None), 
+                   Fn[Tuple[A, B, C, D, None, None, None], E](
+                    lambda t: abc((t[0], t[1], t[2], t[3]))))
+
+class Parse5(Generic[A, B, C, D, E, F], Parse7[A, B, C, D, E, None, None, F]):
+
+  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
+               pd: Parser[D], pe: Parser[E],
+               abc: Callable[[Tuple[A, B, C, D, E]], F]) -> None:
+    super().__init__(pa, pb, pc, pd, pe,
+                   const(None), const(None), 
+                   Fn[Tuple[A, B, C, D, E, None, None], F](
+                    lambda t: abc((t[0], t[1], t[2], t[3], t[4]))))
+
+class Parse6(Generic[A, B, C, D, E, F, G], Parse7[A, B, C, D, E, F, None, G]):
+
+  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
+               pd: Parser[D], pe: Parser[E], pf: Parser[F],
+               abc: Callable[[Tuple[A, B, C, D, E, F]], G]) -> None:
+    super().__init__(pa, pb, pc, pd, pe, pf, const(None), 
+                   Fn[Tuple[A, B, C, D, E, F, None], G](
+                    lambda t: abc((t[0], t[1], t[2], t[3], t[4], t[5]))))
 
 def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
   def x(j: JsonType) -> Parsed[JsonType]:
