@@ -107,6 +107,7 @@ class Parser(Generic[A]):
   def set_path(self, path: List[str]) -> 'Parser[A]':
     return self.map_path(lambda _: path)
 
+  # TODO - this needs to be abstract since all members must implement
   def map_path(self, update: Callable[[List[str]], List[str]]) -> 'Parser[A]':
     return Parser(update(self._path), self._run)
 
@@ -145,10 +146,16 @@ class ListParser:
     def bind(self, r: ListResult[A]) -> Parsed[List[A]]:
       return F1(r[0]) if (not (len(r[0]) == 0)) else F2(r[1])
 
+    def map_path(self, update: Callable[[List[str]], List[str]]) -> 'ListParser.FailFast[A]':
+      return ListParser.FailFast(update(self._path), self._run_list)
+
   class FailSlow(Generic[A], _Base[A, ListResult[A]]):
 
     def bind(self, r: ListResult[A]) -> Parsed[ListResult[A]]:
       return F1(r[0]) if (len(r[1]) == 0 and not (len(r[0]) == 0)) else F2(r)
+
+    def map_path(self, update: Callable[[List[str]], List[str]]) -> 'ListParser.FailSlow[A]':
+      return ListParser.FailSlow(update(self._path), self._run_list)
 
 def parse_dict() -> ParseFn[JsonDict]:
   err = error(JsonDict)
@@ -234,19 +241,27 @@ class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F], pg: Parser[G],
-               abc: Callable[[Tuple[A, B, C, D, E, F, G]], H]) -> None:
+               abc: Callable[[Tuple[A, B, C, D, E, F, G]], H], path: List[str] = []) -> None:
     (self.pa, self.pb, self.pc, self.pd) = (pa, pb, pc, pd)
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
-    def run(j: JsonType) -> PreParsed[H]:
-      fg = map2(append2sg(self.pf.run(j), self.pg.run(j), err_acc), lambda x: x)
-      efg = map2(append2sg(self.pe.run(j), fg, err_acc), lambda x: (x[0],) +  x[1])
-      defg = map2(append2sg(self.pd.run(j), efg, err_acc), lambda x: (x[0],) + x[1])
-      cdefg = map2(append2sg(self.pc.run(j), defg, err_acc), lambda x: (x[0],) + x[1])
-      bcdefg = map2(append2sg(self.pb.run(j), cdefg, err_acc), lambda x: (x[0],) + x[1])
-      abcdefg = map2(append2sg(self.pa.run(j), bcdefg, err_acc), lambda x: (x[0],) + x[1])
-      return ToPreParsed[H]()(map2(abcdefg, self.abc))
-    self._run = run
-    self._path = []
+    self._run = Fn[JsonType, PreParsed[H]](lambda x: F1(F2(ParseException())))
+    self._path = path
+
+  def run(self, j: JsonType) -> Parsed[H]:
+    T = TypeVar('T')
+    def mk(p: Parser[T]) -> Parser[T]:
+      return p.map_path(lambda x: self._path + x)
+    fg = map2(append2sg(mk(self.pf).run(j), mk(self.pg).run(j), err_acc), lambda x: x)
+    efg = map2(append2sg(mk(self.pe).run(j), fg, err_acc), lambda x: (x[0],) +  x[1])
+    defg = map2(append2sg(mk(self.pd).run(j), efg, err_acc), lambda x: (x[0],) + x[1])
+    cdefg = map2(append2sg(mk(self.pc).run(j), defg, err_acc), lambda x: (x[0],) + x[1])
+    bcdefg = map2(append2sg(mk(self.pb).run(j), cdefg, err_acc), lambda x: (x[0],) + x[1])
+    abcdefg = map2(append2sg(mk(self.pa).run(j), bcdefg, err_acc), lambda x: (x[0],) + x[1])
+    return map2(abcdefg, self.abc)
+
+  def map_path(self, update: Callable[[List[str]], List[str]]) -> 'Parser[H]':
+    return Parse7(self.pa, self.pb, self.pc, self.pd, self.pe,
+                  self.pf, self.pg, self.abc, update(self._path))
 
 class Parse1(Generic[A, B], Parse7[A, None, None, None, None, None, None, B]):
 
