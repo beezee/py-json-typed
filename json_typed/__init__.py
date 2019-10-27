@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
 from adt import Compose, Id, F1, F2, F3, F4, Fn, KeepLeft, ListSg, ProductSg, Semigroup
 from dataclasses import dataclass
@@ -46,8 +47,11 @@ class JsonList(List[JsonType]):
 class JsonDict(Dict[str, JsonType]):
     pass
 
-def load_json(j: str) -> any: # type: ignore
-  return json.loads(j) # type: ignore
+def load_json(j: str) -> PreParsed[any]: # type: ignore
+  try: 
+    return F2(json.loads(j)) # type: ignore
+  except Exception as e:
+    return F1(F2(UnknownParseError(e)))
 
 def parse_json(x: any) -> PreParsed[JsonType]: # type: ignore
   try:
@@ -107,32 +111,44 @@ class Parser(Generic[A]):
     return Parser(update(self._path), self._run)
 
   def parse(self, s: str) -> Parsed[A]:
-    return bind2(Compose(toParsed[JsonType](self._path),
-                 Compose(parse_json, load_json))(s), self.run)
+    return bind2(toParsed[JsonType](self._path)(
+            bind2(load_json(s), parse_json)), self.run)
 
 listAcc = ProductSg(ListSg[ParseError](), ListSg[A]())
 
 ListResult = Tuple[List[ParseError], List[A]]
 replacePath = KeepLeft[List[str]]()
-class ListParser(Generic[A], Parser[ListResult[A]]):
+class ListParser:
+  class _Base(ABC, Generic[A, B], Parser[B]):
 
-  def __init__(self, path: List[str], run: ParseFn[A]) -> None:
-    self._path = path
-    self._runList = run
-  
-  def run(self, j: JsonType) -> Parsed[ListResult[A]]:
-    def reducer(l: JsonList) -> Parsed[ListResult[A]]:
-      def x(acc: Tuple[int, ListResult[A]], j: JsonType) -> Tuple[int, ListResult[A]]:
-        return (acc[0] + 1,
-          listAcc.append(acc[1],
-            fold2[List[ParseError], A, ListResult[A]](
-              (lambda x: (x, []),
-               lambda x: ([], [x])))(
-                toParsed[A](self._path + [str(acc[0])], replacePath)(
-                  bind2(parse_json(j), self._runList)))))
-      r = reduce(x, l, (0, Id[ListResult[A]]()(([], []))))
-      return F1(r[1][0]) if (len(r[1][1]) == 0 and not (len(r[1][0]) == 0)) else F2(r[1])
-    return bind2(Parser(self._path, parseList()).run(j), reducer)
+    def __init__(self, path: List[str], run: ParseFn[A]) -> None:
+      self._path = path
+      self._runList = run
+
+    @abstractmethod
+    def bind(self, l: ListResult[A]) -> Parsed[B]: pass
+    def run(self, j: JsonType) -> Parsed[B]:
+      def reducer(l: JsonList) -> Parsed[B]:
+        def x(acc: Tuple[int, ListResult[A]], j: JsonType) -> Tuple[int, ListResult[A]]:
+          return (acc[0] + 1,
+            listAcc.append(acc[1],
+              fold2[List[ParseError], A, ListResult[A]](
+                (lambda x: (x, []),
+                 lambda x: ([], [x])))(
+                  toParsed[A](self._path + [str(acc[0])], replacePath)(
+                    bind2(parse_json(j), self._runList)))))
+        return self.bind(reduce(x, l, (0, Id[ListResult[A]]()(([], []))))[1])
+      return bind2(Parser(self._path, parseList()).run(j), reducer)
+
+  class FailFast(Generic[A], _Base[A, List[A]]):
+
+    def bind(self, r: ListResult[A]) -> Parsed[List[A]]:
+      return F1(r[0]) if (not (len(r[0]) == 0)) else F2(r[1])
+
+  class FailSlow(Generic[A], _Base[A, ListResult[A]]):
+
+    def bind(self, r: ListResult[A]) -> Parsed[ListResult[A]]:
+      return F1(r[0]) if (len(r[1]) == 0 and not (len(r[0]) == 0)) else F2(r)
 
 def parseDict() -> ParseFn[JsonDict]:
   err = error(JsonDict)
