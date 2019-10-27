@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
-from adt import Compose, Id, F1, F2, F3, F4, Fn, KeepLeft, ListSg, ProductSg, Semigroup
+from adt import Compose, Id, F1, F2, F3, F4, Fn, ListSg, ProductSg, SwapSg, Semigroup
 from dataclasses import dataclass
 from functools import reduce
 import json
@@ -117,7 +117,7 @@ class Parser(Generic[A]):
 listAcc = ProductSg(ListSg[ParseError](), ListSg[A]())
 
 ListResult = Tuple[List[ParseError], List[A]]
-replacePath = KeepLeft[List[str]]()
+appendPath = SwapSg(ListSg[str]())
 class ListParser:
   class _Base(ABC, Generic[A, B], Parser[B]):
 
@@ -135,7 +135,7 @@ class ListParser:
               fold2[List[ParseError], A, ListResult[A]](
                 (lambda x: (x, []),
                  lambda x: ([], [x])))(
-                  toParsed[A](self._path + [str(acc[0])], replacePath)(
+                  toParsed[A](self._path + [str(acc[0])], appendPath)(
                     bind2(parse_json(j), self._runList)))))
         return self.bind(reduce(x, l, (0, Id[ListResult[A]]()(([], []))))[1])
       return bind2(Parser(self._path, parseList()).run(j), reducer)
