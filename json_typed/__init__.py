@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from adt import append2sg, bind2, fold2, fold3, fold4, map2, Sum2, Sum3, Sum4
-from adt import Compose, Id, F1, F2, F3, F4, Fn, ListSg, ProductSg, SwapSg, Semigroup
+from adt import Compose, Id, F1, F2, F3, F4, Fn, ListSg, ProductSg, Semigroup
 from dataclasses import dataclass
 from functools import reduce
 import json
@@ -25,6 +25,11 @@ class ParseException(Exception): pass
 class ParseTypeError(ParseException):
   expected: str
   encountered: str
+
+@dataclass
+class TraverseError(ParseException):
+  halt_key: str
+  error: ParseException
 
 @dataclass
 class UnknownParseError(ParseException):
@@ -104,6 +109,9 @@ class Parser(Generic[A]):
   def run(self, j: JsonType) -> Parsed[A]: 
     return bind2(traverse(self._path)(j), Compose(ToParsed[A](self._path), self._run))
 
+  def parseFn(self) -> ParseFn[A]:
+    return Compose(ToPreParsed[A](), self.run)
+
   def set_path(self, path: List[str]) -> 'Parser[A]':
     return self.map_path(lambda _: path)
 
@@ -118,7 +126,6 @@ class Parser(Generic[A]):
 list_acc = ProductSg(ListSg[ParseError](), ListSg[A]())
 
 ListResult = Tuple[List[ParseError], List[A]]
-append_path = SwapSg(ListSg[str]())
 class ListParser:
   class _Base(ABC, Generic[A, B], Parser[B]):
 
@@ -136,7 +143,7 @@ class ListParser:
               fold2[List[ParseError], A, ListResult[A]](
                 (lambda x: (x, []),
                  lambda x: ([], [x])))(
-                  ToParsed[A](self._path + [str(acc[0])], append_path)(
+                  ToParsed[A](self._path + [str(acc[0])])(
                     bind2(parse_json(j), self._run_list)))))
         return self.bind(reduce(x, l, (0, Id[ListResult[A]]()(([], []))))[1])
       return bind2(Parser(self._path, parse_list()).run(j), reducer)
@@ -208,13 +215,16 @@ def parse_none(j: JsonType) -> PreParsed[None]:
   prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
   return parse_prim(type(None), prim)(j)
 
-def parse_const(a: A) -> ParseFn[A]:
-  def x(j: JsonType) -> PreParsed[A]:
-    return F2(a)
-  return x
+class ConstParse(Parser[None]):
+  
+  def __init__(self) -> None:
+    self._run = Fn[JsonType, PreParsed[H]](lambda x: F1(F2(ParseException())))
+    self._path = []
 
-def const(a: A) -> Parser[A]:
-  return Parser([], parse_const(a))
+  def run(self, _: JsonType) -> Parsed[None]: return F2(None)
+
+  def map_path(self, update: Callable[[List[str]], List[str]]) -> 'ConstParse':
+    return self
 
 def parse_optional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
   return Fn[JsonType, PreParsed[Sum2[None, A]]](lambda j:
@@ -265,16 +275,16 @@ class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
 class Parse1(Generic[A, B], Parse7[A, None, None, None, None, None, None, B]):
 
   def __init__(self, pa: Parser[A], ab: Callable[[A], B]) -> None:
-    super().__init__(pa, const(None), const(None), const(None), 
-                   const(None), const(None), const(None), 
+    super().__init__(pa, ConstParse(), ConstParse(), ConstParse(), 
+                   ConstParse(), ConstParse(), ConstParse(), 
                    Fn[Tuple[A, None, None, None, None, None, None], B](
                     lambda t: ab(t[0])))
 
 class Parse2(Generic[A, B, C], Parse7[A, B, None, None, None, None, None, C]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
-    super().__init__(pa, pb, const(None), const(None), 
-                   const(None), const(None), const(None), 
+    super().__init__(pa, pb, ConstParse(), ConstParse(), 
+                   ConstParse(), ConstParse(), ConstParse(), 
                    Fn[Tuple[A, B, None, None, None, None, None], C](
                     lambda t: abc((t[0], t[1]))))
 
@@ -282,8 +292,8 @@ class Parse3(Generic[A, B, C, D], Parse7[A, B, C, None, None, None, None, D]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                abc: Callable[[Tuple[A, B, C]], D]) -> None:
-    super().__init__(pa, pb, pc, const(None),
-                   const(None), const(None), const(None), 
+    super().__init__(pa, pb, pc, ConstParse(),
+                   ConstParse(), ConstParse(), ConstParse(), 
                    Fn[Tuple[A, B, C, None, None, None, None], D](
                     lambda t: abc((t[0], t[1], t[2]))))
 
@@ -292,7 +302,7 @@ class Parse4(Generic[A, B, C, D, E], Parse7[A, B, C, D, None, None, None, E]):
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], abc: Callable[[Tuple[A, B, C, D]], E]) -> None:
     super().__init__(pa, pb, pc, pd,
-                   const(None), const(None), const(None), 
+                   ConstParse(), ConstParse(), ConstParse(), 
                    Fn[Tuple[A, B, C, D, None, None, None], E](
                     lambda t: abc((t[0], t[1], t[2], t[3]))))
 
@@ -302,7 +312,7 @@ class Parse5(Generic[A, B, C, D, E, F], Parse7[A, B, C, D, E, None, None, F]):
                pd: Parser[D], pe: Parser[E],
                abc: Callable[[Tuple[A, B, C, D, E]], F]) -> None:
     super().__init__(pa, pb, pc, pd, pe,
-                   const(None), const(None), 
+                   ConstParse(), ConstParse(), 
                    Fn[Tuple[A, B, C, D, E, None, None], F](
                     lambda t: abc((t[0], t[1], t[2], t[3], t[4]))))
 
@@ -311,7 +321,7 @@ class Parse6(Generic[A, B, C, D, E, F, G], Parse7[A, B, C, D, E, F, None, G]):
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F],
                abc: Callable[[Tuple[A, B, C, D, E, F]], G]) -> None:
-    super().__init__(pa, pb, pc, pd, pe, pf, const(None), 
+    super().__init__(pa, pb, pc, pd, pe, pf, ConstParse(), 
                    Fn[Tuple[A, B, C, D, E, F, None], G](
                     lambda t: abc((t[0], t[1], t[2], t[3], t[4], t[5]))))
 
@@ -323,12 +333,14 @@ def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[Js
       d = parse_dict()(j)
       try:
         aj = map2(d, lambda y: y.get(k[0])) # type: ignore
-        ntk = tk
-        ntk.append(k[0])
-        pj = ToParsed[JsonType](ntk)(bind2(aj, parse_json)) # type: ignore
+        ntk = k if (len(tk) == 0) else tk
+        pj = fold2[List[ParseError], JsonType, Parsed[JsonType]](
+          (lambda x: F1(list(map(Fn[ParseError, ParseError](
+              lambda y: y._replace(error=TraverseError(k[0], y.error))), x))),
+           lambda x: F2(x)))(ToParsed[JsonType](ntk)(bind2(aj, parse_json))) # type: ignore
         return bind2(pj, traverse(k[1:], ntk))
       except Exception as e:
-        return F1([ParseError(ntk, UnknownParseError(e))])
+        return F1([ParseError(tk, UnknownParseError(e))])
   return x
 
 class _BaseSerializer(ABC, Generic[A, B]):

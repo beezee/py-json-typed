@@ -13,21 +13,29 @@ neg_int = ExtendParse[int, int](parse_int,
     CustomParseError({'constraint': 'negative int', 'value': str(x)})))
 quux = Parser(['quux'], neg_int)
 
-@dataclass
-class FBBQ:
+@dataclass 
+class FooBaz:
   foo: Sum2[None, str]
   bar: List[int]
   baz: List[str]
   baz_err: List[ParseError]
+@dataclass
+class FBBQ:
+  foobar_err: List[ParseError]
+  foobar: List[FooBaz]
   quux: int
 
-fbq = Parse2(Parse3(foo, bar, baz, lambda x: x).set_path(['foobar']), quux,
-  lambda t: FBBQ(t[0][0], t[0][1], t[0][2][1], t[0][2][0], t[1]))
+fbq = Parse2(
+  ListParser.FailSlow([], 
+    Parse3(foo, bar, baz, lambda x: FooBaz(x[0], x[1], x[2][1], x[2][0])).parseFn())
+    .set_path(['foobar']), 
+  quux,
+  lambda t: FBBQ(t[0][0], t[0][1], t[1]))
 
 if __name__ == '__main__':
-  print(fbq.parse('{"quux": null, "foobar": {"foo": "bar", "bar": [], "baz": ["quux"]}}'))
-  print(fbq.parse('{"quux": -4, "foobar": {"foo": "bar", "bar": [], "baz": [1, "quux"]}}'))
-  print(fbq.parse('{"quux": 33, "foobar": {"foo": null, "bar": ["a", 2, "3"]}}'))
-  print(fbq.parse('{"quux": null, "foobar": {"foo": 4, "bar": 3, "baz": [2, "quux", 3]}}'))
-  print(fbq.parse('{"quux": -5, "foobar": {"bar": [2, 3, 4], "moo": "bar", "baz": []}}'))
+  print(fbq.parse('{"quux": null, "foobar": [{"foo": "bar", "bar": [], "baz": ["quux"]}]}'))
+  print(fbq.parse('{"quux": -4, "foobar": [1, {"foo": "bar", "bar": [], "baz": [1, "quux"]}]}'))
+  print(fbq.parse('{"quux": 33, "foobar": [{"foo": null, "bar": ["a", 2, "3"]}]}'))
+  print(fbq.parse('{"quux": null, "foobar": [{"foo": 4, "bar": 3, "baz": [2, "quux", 3]}]}'))
+  print(fbq.parse('{"quux": -5, "foobar": [{"bar": [2, 3, 4], "moo": "bar", "baz": []}]}'))
 
