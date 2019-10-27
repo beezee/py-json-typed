@@ -1,27 +1,27 @@
 from adt import Id, Sum2, F1, F2
 from dataclasses import dataclass
-from json_typed import CustomParseError, extendParse
-from json_typed import Parse2, Parse3, ListParser, ParseError, parseStr
-from json_typed import parseInt, parseOptional, Parser
+from json_typed import CustomParseError, ExtendParse
+from json_typed import Parse2, Parse3, ListParser, ParseError, parse_str
+from json_typed import parse_int, parse_optional, Parser
 from typing import List, Tuple
 
-foo = Parser(['foo'], parseOptional(parseStr))
-baz = ListParser.FailSlow(['baz'], parseStr)
-bar = ListParser.FailFast(['bar'], parseInt)
-negInt = extendParse[int, int](parseInt, 
+foo = Parser(['foo'], parse_optional(parse_str))
+baz = ListParser.FailSlow(['baz'], parse_str)
+bar = ListParser.FailFast(['bar'], parse_int)
+neg_int = ExtendParse[int, int](parse_int, 
   lambda x: F2(x) if (x < 0) else F1(
     CustomParseError({'constraint': 'negative int', 'value': str(x)})))
-quux = Parser(['quux'], negInt)
+quux = Parser(['quux'], neg_int)
 
 @dataclass
 class FBBQ:
   foo: Sum2[None, str]
   bar: List[int]
   baz: List[str]
-  bazErr: List[ParseError]
+  baz_err: List[ParseError]
   quux: int
 
-fbq = Parse2(Parse3(foo, bar, baz, lambda x: x).setPath(['foobar']), quux,
+fbq = Parse2(Parse3(foo, bar, baz, lambda x: x).set_path(['foobar']), quux,
   lambda t: FBBQ(t[0][0], t[0][1], t[0][2][1], t[0][2][0], t[1]))
 
 if __name__ == '__main__':
