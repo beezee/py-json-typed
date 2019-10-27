@@ -201,6 +201,28 @@ def parseOptional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
            lambda x: F2(F1(x))))(parseNone()(j)),
        lambda x: F2(F2(x))))(p(j)))
 
+class extendParse(Generic[A, B]):
+  
+  def __init__(self, p: ParseFn[A], c: Callable[[A], Sum2[CustomParseError, B]]) -> None:
+    (self._p, self._c) = (p, c)
+
+  def __call__(self, j: JsonType) -> PreParsed[B]:
+    return Fn[JsonType, PreParsed[B]](
+      lambda x: bind2(self._p(x), 
+        Compose(fold2[CustomParseError, B, PreParsed[B]](
+          (lambda x: F1(F2(x)), lambda x: F2(x))), self._c)))(j)
+
+class Parse1(Generic[A, B]):
+
+  def __init__(self, pa: Parser[A], ab: Callable[[A], B]) -> None:
+    (self.pa, self.ab) = (pa, ab)
+
+  def __call__(self) -> Parser[B]:
+    return Parse7(self.pa, const(None), const(None), const(None), 
+                    const(None), const(None), const(None),
+                    Fn[Tuple[A, None, None, None, None, None, None], B](
+                      lambda t: self.ab(t[0])))()
+
 class Parse2(Generic[A, B, C]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
