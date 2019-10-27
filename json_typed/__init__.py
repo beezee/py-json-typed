@@ -201,42 +201,42 @@ def parseOptional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
            lambda x: F2(F1(x))))(parseNone()(j)),
        lambda x: F2(F2(x))))(p(j)))
 
-class Combine2(Generic[A, B, C]):
+class Parse2(Generic[A, B, C]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
     (self.pa, self.pb, self.abc) = (pa, pb, abc)
 
   def __call__(self) -> Parser[C]:
-    return Combine7(self.pa, self.pb, const(None), const(None), 
+    return Parse7(self.pa, self.pb, const(None), const(None), 
                     const(None), const(None), const(None),
                     Fn[Tuple[A, B, None, None, None, None, None], C](
                       lambda t: self.abc((t[0], t[1]))))()
 
-class Combine3(Generic[A, B, C, D]):
+class Parse3(Generic[A, B, C, D]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                abc: Callable[[Tuple[A, B, C]], D]) -> None:
     (self.pa, self.pb, self.pc, self.abc) = (pa, pb, pc, abc)
 
   def __call__(self) -> Parser[D]:
-    return Combine7(self.pa, self.pb, self.pc, const(None), 
+    return Parse7(self.pa, self.pb, self.pc, const(None), 
                     const(None), const(None), const(None),
                     Fn[Tuple[A, B, C, None, None, None, None], D](
                       lambda t: self.abc((t[0], t[1], t[2]))))()
 
-class Combine4(Generic[A, B, C, D, E]):
+class Parse4(Generic[A, B, C, D, E]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], abc: Callable[[Tuple[A, B, C, D]], E]) -> None:
     (self.pa, self.pb, self.pc, self.pd, self.abc) = (pa, pb, pc, pd, abc)
 
   def __call__(self) -> Parser[E]:
-    return Combine7(self.pa, self.pb, self.pc, self.pd,
+    return Parse7(self.pa, self.pb, self.pc, self.pd,
                     const(None), const(None), const(None),
                     Fn[Tuple[A, B, C, D, None, None, None], E](
                       lambda t: self.abc((t[0], t[1], t[2], t[3]))))()
 
-class Combine5(Generic[A, B, C, D, E, F]):
+class Parse5(Generic[A, B, C, D, E, F]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E],
@@ -244,12 +244,12 @@ class Combine5(Generic[A, B, C, D, E, F]):
     (self.pa, self.pb, self.pc, self.pd, self.pe, self.abc) = (pa, pb, pc, pd, pe, abc)
 
   def __call__(self) -> Parser[F]:
-    return Combine7(self.pa, self.pb, self.pc, self.pd,
+    return Parse7(self.pa, self.pb, self.pc, self.pd,
                     self.pe, const(None), const(None),
                     Fn[Tuple[A, B, C, D, E, None, None], F](
                       lambda t: self.abc((t[0], t[1], t[2], t[3], t[4]))))()
 
-class Combine6(Generic[A, B, C, D, E, F, G]):
+class Parse6(Generic[A, B, C, D, E, F, G]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F],
@@ -258,14 +258,14 @@ class Combine6(Generic[A, B, C, D, E, F, G]):
       self.pe, self.pf, self.abc) = (pa, pb, pc, pd, pe, pf, abc)
 
   def __call__(self) -> Parser[G]:
-    return Combine7(self.pa, self.pb, self.pc, self.pd,
+    return Parse7(self.pa, self.pb, self.pc, self.pd,
                     self.pe, self.pf, const(None),
                     Fn[Tuple[A, B, C, D, E, F, None], G](
                       lambda t: self.abc((t[0], t[1], t[2], t[3], t[4], t[5]))))()
 
 errAcc = ListSg[ParseError]()
 
-class Combine7(Generic[A, B, C, D, E, F, G, H]):
+class Parse7(Generic[A, B, C, D, E, F, G, H]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F], pg: Parser[G],
