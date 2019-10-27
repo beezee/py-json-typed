@@ -315,6 +315,22 @@ class Parse6(Generic[A, B, C, D, E, F, G], Parse7[A, B, C, D, E, F, None, G]):
                    Fn[Tuple[A, B, C, D, E, F, None], G](
                     lambda t: abc((t[0], t[1], t[2], t[3], t[4], t[5]))))
 
+def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
+  def x(j: JsonType) -> Parsed[JsonType]:
+    if len(k) == 0:
+      return F2(j)
+    else:
+      d = parse_dict()(j)
+      try:
+        aj = map2(d, lambda y: y.get(k[0])) # type: ignore
+        ntk = tk
+        ntk.append(k[0])
+        pj = ToParsed[JsonType](ntk)(bind2(aj, parse_json)) # type: ignore
+        return bind2(pj, traverse(k[1:], ntk))
+      except Exception as e:
+        return F1([ParseError(ntk, UnknownParseError(e))])
+  return x
+
 class _BaseSerializer(ABC, Generic[A, B]):
 
   def __init__(self, fn: Callable[[A], JsonType]) -> None:
@@ -364,25 +380,89 @@ class Serializer(Generic[A], _BaseSerializer[A, JsonDict]):
   def lub(self, d: JsonDict) -> JsonType:
     return F3(d)
 
+class EmptySerializer(Serializer[None]):
+  
+  def __init__(self) -> None: pass
+  
+  def format(self, n: None) -> JsonDict:
+    return JsonDict({})
+
+class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
+               sd: Serializer[D], se: Serializer[E], sf: Serializer[F], sg: Serializer[G],
+               abc: Callable[[H], Tuple[A, B, C, D, E, F, G]], path: List[str] = []) -> None:
+    (self.sa, self.sb, self.sc, self.sd) = (sa, sb, sc, sd)
+    (self.se, self.sf, self.sg, self.abc) = (se, sf, sg, abc)
+    self._fn = Fn[H, JsonType](lambda x: F1(F4(None)))
+
+  def format(self, h: H) -> JsonDict:
+    T = TypeVar('T')
+    (a, b, c, d, e, f, g) = self.abc(h)
+    return JsonDict({**self.sa.format(a), **self.sb.format(b), **self.sc.format(c), 
+                     **self.sd.format(d), **self.se.format(e), **self.sf.format(f), 
+                     **self.sg.format(g)})
+
+class Serialize1(Generic[A, B], Serialize7[A, None, None, None, None, None, None, B]):
+
+  def __init__(self, sa: Serializer[A], ab: Callable[[B], A]) -> None:
+    super().__init__(sa, EmptySerializer(), EmptySerializer(), EmptySerializer(), 
+                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
+                   Fn[B, Tuple[A, None, None, None, None, None, None]](
+                    lambda b: (ab(b), None, None, None, None, None, None)))
+
+
+class Serialize2(Generic[A, B, C], Serialize7[A, B, None, None, None, None, None, C]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
+               ab: Callable[[C], Tuple[A, B]]) -> None:
+    super().__init__(sa, sb, EmptySerializer(), EmptySerializer(), 
+                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
+                   Fn[C, Tuple[A, B, None, None, None, None, None]](
+                    lambda c: ab(c) + (None, None, None, None, None)))
+
+class Serialize3(Generic[A, B, C, D], Serialize7[A, B, C, None, None, None, None, D]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
+               sc: Serializer[C], ab: Callable[[D], Tuple[A, B, C]]) -> None:
+    super().__init__(sa, sb, sc, EmptySerializer(), 
+                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
+                   Fn[D, Tuple[A, B, C, None, None, None, None]](
+                    lambda d: ab(d) + (None, None, None, None)))
+
+class Serialize4(Generic[A, B, C, D, E], Serialize7[A, B, C, D, None, None, None, E]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
+               sc: Serializer[C], sd: Serializer[D], 
+               ab: Callable[[E], Tuple[A, B, C, D]]) -> None:
+    super().__init__(sa, sb, sc, sd, 
+                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
+                   Fn[E, Tuple[A, B, C, D, None, None, None]](
+                    lambda e: ab(e) + (None, None, None)))
+
+class Serialize5(Generic[A, B, C, D, E, F], Serialize7[A, B, C, D, E, None, None, F]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
+               sc: Serializer[C], sd: Serializer[D], 
+               se: Serializer[E], ab: Callable[[F], Tuple[A, B, C, D, E]]) -> None:
+    super().__init__(sa, sb, sc, sd, se,
+                   EmptySerializer(), EmptySerializer(),
+                   Fn[F, Tuple[A, B, C, D, E, None, None]](
+                    lambda f: ab(f) + (None, None)))
+
+class Serialize6(Generic[A, B, C, D, E, F, G], Serialize7[A, B, C, D, E, F, None, G]):
+
+  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
+               sc: Serializer[C], sd: Serializer[D], 
+               se: Serializer[E], sf: Serializer[F],
+               ab: Callable[[G], Tuple[A, B, C, D, E, F]]) -> None:
+    super().__init__(sa, sb, sc, sd, se, sf, EmptySerializer(),
+                   Fn[G, Tuple[A, B, C, D, E, F, None]](
+                    lambda g: ab(g) + (None,)))
+
 def serialize(j: JsonType) -> str:
   return json.dumps(fold3[JsonPrimitive, 'JsonList', 'JsonDict', any]( # type: ignore
     (fold4[str, int, bool, None, any]( # type: ignore
       (lambda x: x, lambda x: x, lambda x: x, lambda x: x)), 
       lambda x: list(map(serialize, x)),
       lambda x: {k: serialize(v) for (k, v) in x.items()}))(j))
-
-def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
-  def x(j: JsonType) -> Parsed[JsonType]:
-    if len(k) == 0:
-      return F2(j)
-    else:
-      d = parse_dict()(j)
-      try:
-        aj = map2(d, lambda y: y.get(k[0])) # type: ignore
-        ntk = tk
-        ntk.append(k[0])
-        pj = ToParsed[JsonType](ntk)(bind2(aj, parse_json)) # type: ignore
-        return bind2(pj, traverse(k[1:], ntk))
-      except Exception as e:
-        return F1([ParseError(ntk, UnknownParseError(e))])
-  return x
