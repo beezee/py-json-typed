@@ -315,6 +315,62 @@ class Parse6(Generic[A, B, C, D, E, F, G], Parse7[A, B, C, D, E, F, None, G]):
                    Fn[Tuple[A, B, C, D, E, F, None], G](
                     lambda t: abc((t[0], t[1], t[2], t[3], t[4], t[5]))))
 
+class _BaseSerializer(ABC, Generic[A, B]):
+
+  def __init__(self, fn: Callable[[A], JsonType]) -> None:
+    self._fn = fn
+
+  @abstractmethod
+  def format(self, a: A) -> B: pass
+
+  @abstractmethod
+  def lub(self, b: B) -> JsonType: pass
+
+  def run(self, a: A) -> str:
+    return serialize(self.lub(self.format(a)))
+
+class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
+  
+  def __init__(self, fn: Callable[[A], JsonType]) -> None:
+    self._fn = Fn[List[A], JsonType](lambda x: F1(F4(None)))
+    self._list_fn = fn
+
+  def format(self, a: List[A]) -> JsonList:
+    return JsonList(map(self._list_fn, a))
+
+  def lub(self, l: JsonList) -> JsonType:
+    return F2(l)
+
+class Serializer(Generic[A], _BaseSerializer[A, JsonDict]):
+
+  def __init__(self, top: str, path: List[str], fn: Callable[[A], JsonType]) -> None:
+    self._fn = fn
+    self._top = top
+    self._path = path
+
+  def format(self, a: A) -> JsonDict:
+    m = JsonDict()
+    acc = m
+    p = [self._top] + self._path
+    k = p.pop(0) 
+    while (len(p) > 0):
+      n = JsonDict()
+      acc[k] = F3(n)
+      acc = n
+      k = p.pop(0)
+    acc[k] = self._fn(a)
+    return m
+
+  def lub(self, d: JsonDict) -> JsonType:
+    return F3(d)
+
+def serialize(j: JsonType) -> str:
+  return json.dumps(fold3[JsonPrimitive, 'JsonList', 'JsonDict', any]( # type: ignore
+    (fold4[str, int, bool, None, any]( # type: ignore
+      (lambda x: x, lambda x: x, lambda x: x, lambda x: x)), 
+      lambda x: list(map(serialize, x)),
+      lambda x: {k: serialize(v) for (k, v) in x.items()}))(j))
+
 def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
   def x(j: JsonType) -> Parsed[JsonType]:
     if len(k) == 0:
