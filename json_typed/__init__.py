@@ -343,9 +343,11 @@ def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[Js
         return F1([ParseError(tk, UnknownParseError(e))])
   return x
 
+SerializeFn = Callable[[A], JsonType]
+
 class _BaseSerializer(ABC, Generic[A, B]):
 
-  def __init__(self, fn: Callable[[A], JsonType]) -> None:
+  def __init__(self, path: List[str], fn: SerializeFn[A]) -> None:
     self._fn = fn
 
   @abstractmethod
@@ -354,7 +356,13 @@ class _BaseSerializer(ABC, Generic[A, B]):
   @abstractmethod
   def lub(self, b: B) -> JsonType: pass
 
-  def run(self, a: A) -> str:
+  @abstractmethod
+  def map_path(self, update: Callable[[List[str]], List[str]]) -> '_BaseSerializer[A, B]': pass
+
+  def serialize_fn(self, a: A) -> JsonType:
+    return self.lub(self.format(a))
+
+  def serialize(self, a: A) -> str:
     return serialize(self.lub(self.format(a)))
 
 class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
@@ -362,6 +370,7 @@ class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
   def __init__(self, fn: SerializeFn[A]) -> None:
     self._fn = Fn[List[A], JsonType](lambda x: F1(F4(None)))
     self._list_fn = fn
+    self._path: List[str] = []
 
   def format(self, a: List[A]) -> JsonList:
     return JsonList(map(self._list_fn, a))
@@ -369,19 +378,19 @@ class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
   def lub(self, l: JsonList) -> JsonType:
     return F2(l)
 
-SerializeFn = Callable[[A], JsonType]
+  def map_path(self, path: Callable[[List[str]], List[str]]) -> 'ListSerializer[A]':
+    return self
 
 class Serializer(Generic[A], _BaseSerializer[A, JsonDict]):
 
   def __init__(self, top: str, path: List[str], fn: SerializeFn[A]) -> None:
     self._fn = fn
-    self._top = top
-    self._path = path
+    self._path = [top] + path
 
   def format(self, a: A) -> JsonDict:
     m = JsonDict()
     acc = m
-    p = [self._top] + self._path
+    p = self._path + []
     k = p.pop(0) 
     while (len(p) > 0):
       n = JsonDict()
@@ -394,6 +403,9 @@ class Serializer(Generic[A], _BaseSerializer[A, JsonDict]):
   def lub(self, d: JsonDict) -> JsonType:
     return F3(d)
 
+  def map_path(self, update: Callable[[List[str]], List[str]]) -> 'Serializer[A]':
+    return Serializer(self._path[0], self._path[1:], self._fn)
+
 class EmptySerializer(Serializer[None]):
   
   def __init__(self) -> None: pass
@@ -401,7 +413,8 @@ class EmptySerializer(Serializer[None]):
   def format(self, n: None) -> JsonDict:
     return JsonDict({})
 
-
+  def map_path(self, update: Callable[[List[str]], List[str]]) -> 'EmptySerializer':
+    return self
 
 class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
 
@@ -414,10 +427,13 @@ class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
 
   def format(self, h: H) -> JsonDict:
     T = TypeVar('T')
+    def mk(s: Serializer[T]) -> Serializer[T]:
+      return s.map_path(lambda x: self._path + x)
     (a, b, c, d, e, f, g) = self.abc(h)
-    return JsonDict({**self.sa.format(a), **self.sb.format(b), **self.sc.format(c), 
-                     **self.sd.format(d), **self.se.format(e), **self.sf.format(f), 
-                     **self.sg.format(g)})
+    return JsonDict({**mk(self.sa).format(a), **mk(self.sb).format(b), 
+                     **mk(self.sc).format(c), **mk(self.sd).format(d), 
+                     **mk(self.se).format(e), **mk(self.sf).format(f), 
+                     **mk(self.sg).format(g)})
 
 class Serialize1(Generic[A, B], Serialize7[A, None, None, None, None, None, None, B]):
 
@@ -479,7 +495,7 @@ class Serialize6(Generic[A, B, C, D, E, F, G], Serialize7[A, B, C, D, E, F, None
 def serialize_dict(d: JsonDict) -> JsonType:
   return F3(d)
 
-def serialize_list(l: JsonList) -> JsonType:
+def serialize_json_list(l: JsonList) -> JsonType:
   return F2(l)
 
 def serialize_str(s: str) -> JsonType:
@@ -497,6 +513,9 @@ def serialize_none(n: None) -> JsonType:
 def serialize_optional(f: SerializeFn[A]) -> SerializeFn[Sum2[None, A]]:
   return fold2[None, A, JsonType]((serialize_none, f))
 
+def serialize_list(f: SerializeFn[A]) -> SerializeFn[List[A]]:
+  return Fn[List[A], JsonType](lambda x: F2(JsonList(list(map(f, x)))))
+
 class ExtendSerialize(Generic[A, B]):
   
   def __init__(self, p: SerializeFn[A], c: Callable[[B], A]) -> None:
@@ -505,9 +524,12 @@ class ExtendSerialize(Generic[A, B]):
   def __call__(self, b: B) -> JsonType:
     return self._p(self._c(b))
 
-def serialize(j: JsonType) -> str:
-  return json.dumps(fold3[JsonPrimitive, 'JsonList', 'JsonDict', any]( # type: ignore
+def serialize_rec(j: JsonType) -> any: # type: ignore
+  return fold3[JsonPrimitive, 'JsonList', 'JsonDict', any]( # type: ignore
     (fold4[str, int, bool, None, any]( # type: ignore
       (lambda x: x, lambda x: x, lambda x: x, lambda x: x)), 
-      lambda x: list(map(serialize, x)),
-      lambda x: {k: serialize(v) for (k, v) in x.items()}))(j))
+      lambda x: list(map(serialize_rec, x)),
+      lambda x: {k: serialize_rec(v) for (k, v) in x.items()}))(j)
+
+def serialize(j: JsonType) -> str:
+  return json.dumps(serialize_rec(j), separators=(',', ':'))
