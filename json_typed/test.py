@@ -27,7 +27,7 @@ class FBBQ:
 
 fbq = Parse2(
   ListParser.FailSlow([], 
-    Parse3(foo, bar, baz, lambda x: FooBaz(x[0], x[1], x[2][1], x[2][0])).parseFn())
+    Parse3(foo, bar, baz, lambda x: FooBaz(x[0], x[1], x[2][1], x[2][0])).parse_fn())
     .set_path(['foobar']), 
   quux,
   lambda t: FBBQ(t[0][0], t[0][1], t[1]))

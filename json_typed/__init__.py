@@ -109,7 +109,7 @@ class Parser(Generic[A]):
   def run(self, j: JsonType) -> Parsed[A]: 
     return bind2(traverse(self._path)(j), Compose(ToParsed[A](self._path), self._run))
 
-  def parseFn(self) -> ParseFn[A]:
+  def parse_fn(self) -> ParseFn[A]:
     return Compose(ToPreParsed[A](), self.run)
 
   def set_path(self, path: List[str]) -> 'Parser[A]':
