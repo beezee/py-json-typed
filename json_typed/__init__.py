@@ -359,7 +359,7 @@ class _BaseSerializer(ABC, Generic[A, B]):
 
 class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
   
-  def __init__(self, fn: Callable[[A], JsonType]) -> None:
+  def __init__(self, fn: SerializeFn[A]) -> None:
     self._fn = Fn[List[A], JsonType](lambda x: F1(F4(None)))
     self._list_fn = fn
 
@@ -369,9 +369,11 @@ class ListSerializer(Generic[A], _BaseSerializer[List[A], JsonList]):
   def lub(self, l: JsonList) -> JsonType:
     return F2(l)
 
+SerializeFn = Callable[[A], JsonType]
+
 class Serializer(Generic[A], _BaseSerializer[A, JsonDict]):
 
-  def __init__(self, top: str, path: List[str], fn: Callable[[A], JsonType]) -> None:
+  def __init__(self, top: str, path: List[str], fn: SerializeFn[A]) -> None:
     self._fn = fn
     self._top = top
     self._path = path
@@ -398,6 +400,8 @@ class EmptySerializer(Serializer[None]):
   
   def format(self, n: None) -> JsonDict:
     return JsonDict({})
+
+
 
 class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
 
@@ -471,6 +475,35 @@ class Serialize6(Generic[A, B, C, D, E, F, G], Serialize7[A, B, C, D, E, F, None
     super().__init__(sa, sb, sc, sd, se, sf, EmptySerializer(),
                    Fn[G, Tuple[A, B, C, D, E, F, None]](
                     lambda g: ab(g) + (None,)))
+
+def serialize_dict(d: JsonDict) -> JsonType:
+  return F3(d)
+
+def serialize_list(l: JsonList) -> JsonType:
+  return F2(l)
+
+def serialize_str(s: str) -> JsonType:
+  return F1(F1(s))
+
+def serialize_int(i: int) -> JsonType:
+  return F1(F2(i))
+
+def serialize_bool(b: bool) -> JsonType:
+  return F1(F3(b))
+
+def serialize_none(n: None) -> JsonType:
+  return F1(F4(n))
+
+def serialize_optional(f: SerializeFn[A]) -> SerializeFn[Sum2[None, A]]:
+  return fold2[None, A, JsonType]((serialize_none, f))
+
+class ExtendSerialize(Generic[A, B]):
+  
+  def __init__(self, p: SerializeFn[A], c: Callable[[B], A]) -> None:
+    (self._p, self._c) = (p, c)
+
+  def __call__(self, b: B) -> JsonType:
+    return self._p(self._c(b))
 
 def serialize(j: JsonType) -> str:
   return json.dumps(fold3[JsonPrimitive, 'JsonList', 'JsonDict', any]( # type: ignore
