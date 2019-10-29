@@ -6,7 +6,7 @@ from json_typed import parse_int, parse_optional, Parser
 from json_typed import ExtendSerialize, Serialize2, Serialize3, ListSerializer
 from json_typed import serialize_str, serialize_int, serialize_optional
 from json_typed import serialize_list, Serializer
-from typing import List, Tuple
+from typing import Callable, NamedTuple, List, Tuple, Type
 import json
 
 @dataclass 
@@ -40,6 +40,7 @@ fbq = Parse2(
     .set_path(['foobar']), 
   quux,
   lambda t: FBBQ(t[0][0], t[0][1], t[1]))
+
 
 sfbq = Serialize2[List[FooBaz], int, FBBQ](
   Serializer('foobar', [], 
