@@ -19,18 +19,10 @@ class FBBQ:
   foobar: Tuple[List[ParseError], List[FooBaz]]
   quux: int
 
-"""foo = Parser(['foo'], parse_optional(parse_str))
-baz = ListParser.FailSlow(['baz'], parse_str)
-bar = ListParser.FailFast(['bar'], parse_int)
-neg_int = ExtendParse[int, int](parse_int, 
-  lambda x: F2(x) if (x < 0) else F1(
-    CustomParseError({'constraint': 'negative int', 'value': str(x)})))
-quux = Parser(['quux'], neg_int)"""
-
-fooS = Serializer('foo', [], serialize_optional(serialize_str))
+"""fooS = Serializer('foo', [], serialize_optional(serialize_str))
 bazS = Serializer('baz', [], serialize_list(serialize_str))
 barS = Serializer('bar', [], serialize_list(serialize_int))
-quuxS = Serializer('quux', [], serialize_int)
+quuxS = Serializer('quux', [], serialize_int)"""
 
 foobaz = Parse3(FooBaz)(
   parse_optional(parse_str(['foo'])),
@@ -47,6 +39,12 @@ fbq = Parse2(FBBQ)(
   quuxS,
   lambda x: (x.foobar, x.quux))"""
   
+sfbq = Serialize2(FBBQ, lambda x: (x.foobar[1], x.quux))(
+  serialize_list(Serialize3(FooBaz, lambda x: (x.foo, x.bar, x.baz[1]), ['foobar'])(
+    serialize_optional(serialize_str('foo')),
+    serialize_list(serialize_int('bar')),
+    serialize_list(serialize_str('baz')))),
+  serialize_int('quux'))
 
 if __name__ == '__main__':
   print(fbq.parse('{"quux": null, "foobar": [{"foo": "bar", "bar": [], "baz": ["quux"]}]}'))
@@ -55,6 +53,6 @@ if __name__ == '__main__':
   print(fbq.parse('{"quux": null, "foobar": [{"foo": 4, "bar": 3, "baz": [2, "quux", 3]}]}'))
   print(fbq.parse('{"quux": -5, "foobar": [{"bar": [2, 3, 4], "moo": "bar", "baz": []}]}'))
 
-  """print(
+  print(
     map2(fbq.parse('{"quux": -4, "foobar": [1, {"foo": "bar", "bar": [], "baz": [1, "quux"]}]}'),
-    sfbq.serialize))"""
+    sfbq.serialize))
