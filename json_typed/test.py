@@ -19,11 +19,6 @@ class FBBQ:
   foobar: Tuple[List[ParseError], List[FooBaz]]
   quux: int
 
-"""fooS = Serializer('foo', [], serialize_optional(serialize_str))
-bazS = Serializer('baz', [], serialize_list(serialize_str))
-barS = Serializer('bar', [], serialize_list(serialize_int))
-quuxS = Serializer('quux', [], serialize_int)"""
-
 foobaz = Parse3(FooBaz)(
   parse_optional(parse_str(['foo'])),
   parse_all_list(parse_int(['bar'])),
@@ -31,13 +26,6 @@ foobaz = Parse3(FooBaz)(
 fbq = Parse2(FBBQ)(
   parse_any_list(foobaz).set_path(['foobar']),
   parse_int(['quux']))
-
-"""sfbq = Serialize2[List[FooBaz], int, FBBQ](
-  Serializer('foobar', [], 
-    serialize_list(Serialize3[Sum2[None, str], List[int], List[str], FooBaz](
-      fooS, barS, bazS, lambda x: (x.foo, x.bar, x.baz)).serialize_fn)),
-  quuxS,
-  lambda x: (x.foobar, x.quux))"""
   
 sfbq = Serialize2(FBBQ, lambda x: (x.foobar[1], x.quux))(
   serialize_list(Serialize3(FooBaz, lambda x: (x.foo, x.bar, x.baz[1]), ['foobar'])(

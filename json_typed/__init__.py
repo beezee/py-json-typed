@@ -270,13 +270,21 @@ class Parser7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
                abc: Callable[[Tuple[A, B, C, D, E, F, G]], H], path: List[str] = []) -> None:
     (self.pa, self.pb, self.pc, self.pd) = (pa, pb, pc, pd)
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
-    self._run = Compose(ToPreParsed[H](), self.run_composite)
+    self._run = self.parse_fn()
     self._path = path
 
-  def run_composite(self, j: JsonType) -> Parsed[H]:
+  def run(self, j: JsonType) -> Parsed[H]: 
+    return self.run_composite(lambda x: self._path + x, j)
+
+  def parse_fn(self) -> ParseFn[H]:
+    def x(j: JsonType) -> PreParsed[H]:
+      return ToPreParsed[H]()(self.run_composite(lambda x: x, j))
+    return x
+
+  def run_composite(self, upd_path: Callable[[List[str]], List[str]], j: JsonType) -> Parsed[H]:
     T = TypeVar('T')
     def mk(p: Parser[T]) -> Parser[T]:
-      return p.map_path(lambda x: self._path + x)
+      return p.map_path(upd_path)
     fg = map2(append2sg(mk(self.pf).run(j), mk(self.pg).run(j), err_acc), lambda x: x)
     efg = map2(append2sg(mk(self.pe).run(j), fg, err_acc), lambda x: (x[0],) +  x[1])
     defg = map2(append2sg(mk(self.pd).run(j), efg, err_acc), lambda x: (x[0],) + x[1])
