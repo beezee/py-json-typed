@@ -110,7 +110,10 @@ class Parser(Generic[A]):
     return bind2(traverse(self._path)(j), Compose(ToParsed[A](self._path), self._run))
 
   def parse_fn(self) -> ParseFn[A]:
-    return Compose(ToPreParsed[A](), self.run)
+    return self._run
+
+  def path(self) -> List[str]:
+    return self._path
 
   def set_path(self, path: List[str]) -> 'Parser[A]':
     return self.map_path(lambda _: path)
@@ -195,25 +198,33 @@ def parse_prim(t: Type[A],
      lambda x: F1(err('List')),
      lambda x: F1(err('Dict'))))
 
-def parse_str(j: JsonType) -> PreParsed[str]:
-  (_, b, c, d) = prims(str).fold
-  prim = fold4[str, int, bool, None, PreParsed[str]]((lambda x: F2(x), b, c, d))
-  return parse_prim(str, prim)(j)
+def parse_str(p: List[str]) -> Parser[str]:
+  def x(j: JsonType) -> PreParsed[str]:
+    (_, b, c, d) = prims(str).fold
+    prim = fold4[str, int, bool, None, PreParsed[str]]((lambda x: F2(x), b, c, d))
+    return parse_prim(str, prim)(j)
+  return Parser(p, x)
 
-def parse_int(j: JsonType) -> PreParsed[int]:
-  (a, _, c, d) = prims(int).fold
-  prim = fold4[str, int, bool, None, PreParsed[int]]((a, lambda x: F2(x), c, d))
-  return parse_prim(int, prim)(j)
+def parse_int(p: List[str]) -> Parser[int]:
+  def x(j: JsonType) -> PreParsed[int]:
+    (a, _, c, d) = prims(int).fold
+    prim = fold4[str, int, bool, None, PreParsed[int]]((a, lambda x: F2(x), c, d))
+    return parse_prim(int, prim)(j)
+  return Parser(p, x)
 
-def parse_bool(j: JsonType) -> PreParsed[bool]:
-  (a, b, _, d) = prims(bool).fold
-  prim = fold4[str, int, bool, None, PreParsed[bool]]((a, b, lambda x: F2(x), d))
-  return parse_prim(bool, prim)(j)
+def parse_bool(p: List[str]) -> Parser[bool]:
+  def x(j: JsonType) -> PreParsed[bool]:
+    (a, b, _, d) = prims(bool).fold
+    prim = fold4[str, int, bool, None, PreParsed[bool]]((a, b, lambda x: F2(x), d))
+    return parse_prim(bool, prim)(j)
+  return Parser(p, x)
 
-def parse_none(j: JsonType) -> PreParsed[None]:
-  (a, b, c, _) = prims(type(None)).fold
-  prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
-  return parse_prim(type(None), prim)(j)
+def parse_none(p: List[str]) -> Parser[None]:
+  def x(j: JsonType) -> PreParsed[None]:
+    (a, b, c, _) = prims(type(None)).fold
+    prim = fold4[str, int, bool, None, PreParsed[None]]((a, b, c, lambda x: F2(x)))
+    return parse_prim(type(None), prim)(j)
+  return Parser(p, x)
 
 class ConstParse(Parser[None]):
   
@@ -226,13 +237,19 @@ class ConstParse(Parser[None]):
   def map_path(self, update: Callable[[List[str]], List[str]]) -> 'ConstParse':
     return self
 
-def parse_optional(p: ParseFn[A]) -> ParseFn[Sum2[None, A]]:
-  return Fn[JsonType, PreParsed[Sum2[None, A]]](lambda j:
+def parse_optional(p: Parser[A]) -> Parser[Sum2[None, A]]:
+  return Parser(p.path(), Fn[JsonType, PreParsed[Sum2[None, A]]](lambda j:
     fold2[PreParseError, A, PreParsed[Sum2[None, A]]](
       (lambda x: fold2[PreParseError, None, PreParsed[Sum2[None, A]]](
           (lambda _: F1(x),
-           lambda x: F2(F1(x))))(parse_none(j)),
-       lambda x: F2(F2(x))))(p(j)))
+           lambda x: F2(F1(x))))(parse_none(p.path()).parse_fn()(j)),
+       lambda x: F2(F2(x))))(p.parse_fn()(j))))
+
+def parse_all_list(p: Parser[A]) -> ListParser.FailFast[A]:
+  return ListParser.FailFast(p.path(), p.parse_fn())
+
+def parse_any_list(p: Parser[A]) -> ListParser.FailSlow[A]:
+  return ListParser.FailSlow(p.path(), p.parse_fn())
 
 class ExtendParse(Generic[A, B]):
   
@@ -246,17 +263,17 @@ class ExtendParse(Generic[A, B]):
 
 err_acc = ListSg[ParseError]()
 
-class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
+class Parser7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
 
   def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F], pg: Parser[G],
                abc: Callable[[Tuple[A, B, C, D, E, F, G]], H], path: List[str] = []) -> None:
     (self.pa, self.pb, self.pc, self.pd) = (pa, pb, pc, pd)
     (self.pe, self.pf, self.pg, self.abc) = (pe, pf, pg, abc)
-    self._run = Fn[JsonType, PreParsed[H]](lambda x: F1(F2(ParseException())))
+    self._run = Compose(ToPreParsed[H](), self.run_composite)
     self._path = path
 
-  def run(self, j: JsonType) -> Parsed[H]:
+  def run_composite(self, j: JsonType) -> Parsed[H]:
     T = TypeVar('T')
     def mk(p: Parser[T]) -> Parser[T]:
       return p.map_path(lambda x: self._path + x)
@@ -269,61 +286,85 @@ class Parse7(Generic[A, B, C, D, E, F, G, H], Parser[H]):
     return map2(abcdefg, self.abc)
 
   def map_path(self, update: Callable[[List[str]], List[str]]) -> 'Parser[H]':
-    return Parse7(self.pa, self.pb, self.pc, self.pd, self.pe,
+    return Parser7(self.pa, self.pb, self.pc, self.pd, self.pe,
                   self.pf, self.pg, self.abc, update(self._path))
 
-class Parse1(Generic[A, B], Parse7[A, None, None, None, None, None, None, B]):
+class Parse7(Generic[A, B, C, D, E, F, G, H]):
+  
+  def __init__(self, fn: Callable[[A, B, C, D, E, F, G], H], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
 
-  def __init__(self, pa: Parser[A], ab: Callable[[A], B]) -> None:
-    super().__init__(pa, ConstParse(), ConstParse(), ConstParse(), 
-                   ConstParse(), ConstParse(), ConstParse(), 
-                   Fn[Tuple[A, None, None, None, None, None, None], B](
-                    lambda t: ab(t[0])))
-
-class Parse2(Generic[A, B, C], Parse7[A, B, None, None, None, None, None, C]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], abc: Callable[[Tuple[A, B]], C]) -> None:
-    super().__init__(pa, pb, ConstParse(), ConstParse(), 
-                   ConstParse(), ConstParse(), ConstParse(), 
-                   Fn[Tuple[A, B, None, None, None, None, None], C](
-                    lambda t: abc((t[0], t[1]))))
-
-class Parse3(Generic[A, B, C, D], Parse7[A, B, C, None, None, None, None, D]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               abc: Callable[[Tuple[A, B, C]], D]) -> None:
-    super().__init__(pa, pb, pc, ConstParse(),
-                   ConstParse(), ConstParse(), ConstParse(), 
-                   Fn[Tuple[A, B, C, None, None, None, None], D](
-                    lambda t: abc((t[0], t[1], t[2]))))
-
-class Parse4(Generic[A, B, C, D, E], Parse7[A, B, C, D, None, None, None, E]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               pd: Parser[D], abc: Callable[[Tuple[A, B, C, D]], E]) -> None:
-    super().__init__(pa, pb, pc, pd,
-                   ConstParse(), ConstParse(), ConstParse(), 
-                   Fn[Tuple[A, B, C, D, None, None, None], E](
-                    lambda t: abc((t[0], t[1], t[2], t[3]))))
-
-class Parse5(Generic[A, B, C, D, E, F], Parse7[A, B, C, D, E, None, None, F]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
-               pd: Parser[D], pe: Parser[E],
-               abc: Callable[[Tuple[A, B, C, D, E]], F]) -> None:
-    super().__init__(pa, pb, pc, pd, pe,
-                   ConstParse(), ConstParse(), 
-                   Fn[Tuple[A, B, C, D, E, None, None], F](
-                    lambda t: abc((t[0], t[1], t[2], t[3], t[4]))))
-
-class Parse6(Generic[A, B, C, D, E, F, G], Parse7[A, B, C, D, E, F, None, G]):
-
-  def __init__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
+  def __call__(self, pa: Parser[A], pb: Parser[B], pc: Parser[C],
                pd: Parser[D], pe: Parser[E], pf: Parser[F],
-               abc: Callable[[Tuple[A, B, C, D, E, F]], G]) -> None:
-    super().__init__(pa, pb, pc, pd, pe, pf, ConstParse(), 
-                   Fn[Tuple[A, B, C, D, E, F, None], G](
-                    lambda t: abc((t[0], t[1], t[2], t[3], t[4], t[5]))))
+               pg: Parser[G]) -> Parser7[A, B, C, D, E, F, G, H]:
+    return Parser7(pa, pb, pc, pd, pe, pf, pg,
+      lambda x: self._fn(x[0], x[1], x[2], x[3], x[4], x[5], x[6]),
+      self._path)
+
+class Parse1(Generic[A, B]):
+  
+  def __init__(self, fn: Callable[[A], B], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A]) -> Parser7[A, None, None, None, None, None, None, B]:
+    return Parser7(pa, ConstParse(), ConstParse(), ConstParse(),
+      ConstParse(), ConstParse(), ConstParse(),
+      lambda x: self._fn(x[0]), self._path)
+
+class Parse2(Generic[A, B, C]):
+  
+  def __init__(self, fn: Callable[[A, B], C], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A], 
+               pb: Parser[B]) -> Parser7[A, B, None, None, None, None, None, C]:
+    return Parser7(pa, pb, ConstParse(), ConstParse(),
+      ConstParse(), ConstParse(), ConstParse(),
+      lambda x: self._fn(x[0], x[1]), self._path)
+
+class Parse3(Generic[A, B, C, D]):
+  
+  def __init__(self, fn: Callable[[A, B, C], D], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A], pb: Parser[B],
+               pc: Parser[C]) -> Parser7[A, B, C, None, None, None, None, D]:
+    return Parser7(pa, pb, pc, ConstParse(),
+      ConstParse(), ConstParse(), ConstParse(),
+      lambda x: self._fn(x[0], x[1], x[2]), self._path)
+
+class Parse4(Generic[A, B, C, D, E]):
+  
+  def __init__(self, fn: Callable[[A, B, C, D], E], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A], pb: Parser[B],
+               pc: Parser[C], pd: Parser[D]) -> Parser7[A, B, C, D, None, None, None, E]:
+    return Parser7(pa, pb, pc, pd,
+      ConstParse(), ConstParse(), ConstParse(),
+      lambda x: self._fn(x[0], x[1], x[2], x[3]), self._path)
+
+class Parse5(Generic[A, B, C, D, E, F]):
+  
+  def __init__(self, fn: Callable[[A, B, C, D, E], F], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A], pb: Parser[B],
+               pc: Parser[C], pd: Parser[D],
+               pe: Parser[E]) -> Parser7[A, B, C, D, E, None, None, F]:
+    return Parser7(pa, pb, pc, pd, pe, ConstParse(), ConstParse(), 
+      lambda x: self._fn(x[0], x[1], x[2], x[3], x[4]), self._path)
+
+class Parse6(Generic[A, B, C, D, E, F, G]):
+  
+  def __init__(self, fn: Callable[[A, B, C, D, E, F], G], path: List[str] = []) -> None:
+    (self._path, self._fn) = (path, fn)
+
+  def __call__(self, pa: Parser[A], pb: Parser[B],
+               pc: Parser[C], pd: Parser[D],
+               pe: Parser[E], pf: Parser[F]) -> Parser7[A, B, C, D, E, F, None, G]:
+    return Parser7(pa, pb, pc, pd, pe, pf, ConstParse(), 
+      lambda x: self._fn(x[0], x[1], x[2], x[3], x[4], x[5]), self._path)
 
 def traverse(k: List[str], tk: List[str] = []) -> Callable[[JsonType], Parsed[JsonType]]:
   def x(j: JsonType) -> Parsed[JsonType]:
@@ -416,14 +457,14 @@ class EmptySerializer(Serializer[None]):
   def map_path(self, update: Callable[[List[str]], List[str]]) -> 'EmptySerializer':
     return self
 
-class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
+class Serializer7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
 
   def __init__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
                sd: Serializer[D], se: Serializer[E], sf: Serializer[F], sg: Serializer[G],
                abc: Callable[[H], Tuple[A, B, C, D, E, F, G]], path: List[str] = []) -> None:
     (self.sa, self.sb, self.sc, self.sd) = (sa, sb, sc, sd)
     (self.se, self.sf, self.sg, self.abc) = (se, sf, sg, abc)
-    self._fn = Fn[H, JsonType](lambda x: F1(F4(None)))
+    (self._fn, self._path) = (self.serialize_fn, path)
 
   def format(self, h: H) -> JsonDict:
     T = TypeVar('T')
@@ -435,62 +476,95 @@ class Serialize7(Generic[A, B, C, D, E, F, G, H], Serializer[H]):
                      **mk(self.se).format(e), **mk(self.sf).format(f), 
                      **mk(self.sg).format(g)})
 
-class Serialize1(Generic[A, B], Serialize7[A, None, None, None, None, None, None, B]):
+class Serialize7(Generic[A, B, C, D, E, F, G, H]):
 
-  def __init__(self, sa: Serializer[A], ab: Callable[[B], A]) -> None:
-    super().__init__(sa, EmptySerializer(), EmptySerializer(), EmptySerializer(), 
-                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
-                   Fn[B, Tuple[A, None, None, None, None, None, None]](
-                    lambda b: (ab(b), None, None, None, None, None, None)))
+  def __init__(self, t: Type[H], fn: Callable[[H], Tuple[A, B, C, D, E, F, G]],
+               path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
 
+  def __call__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
+               sd: Serializer[D], se: Serializer[E], sf: Serializer[F],
+               sg: Serializer[G]) -> Serializer[H]:
+    return Serializer7(sa, sb, sc, sd, se, sf, sg, self._fn, self._path)
 
-class Serialize2(Generic[A, B, C], Serialize7[A, B, None, None, None, None, None, C]):
+class Serialize1(Generic[A, B]):
 
-  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
-               ab: Callable[[C], Tuple[A, B]]) -> None:
-    super().__init__(sa, sb, EmptySerializer(), EmptySerializer(), 
-                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
-                   Fn[C, Tuple[A, B, None, None, None, None, None]](
-                    lambda c: ab(c) + (None, None, None, None, None)))
+  def __init__(self, t: Type[B], fn: Callable[[B], A], path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
 
-class Serialize3(Generic[A, B, C, D], Serialize7[A, B, C, None, None, None, None, D]):
+  def __call__(self, sa: Serializer[A]) -> Serializer[B]:
+    return Serializer7(sa, EmptySerializer(), EmptySerializer(),
+            EmptySerializer(), EmptySerializer(), EmptySerializer(),
+            EmptySerializer(), lambda b: (self._fn(b), None, None, None, None, None, None),
+            self._path)
 
-  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
-               sc: Serializer[C], ab: Callable[[D], Tuple[A, B, C]]) -> None:
-    super().__init__(sa, sb, sc, EmptySerializer(), 
-                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
-                   Fn[D, Tuple[A, B, C, None, None, None, None]](
-                    lambda d: ab(d) + (None, None, None, None)))
+class Serialize2(Generic[A, B, C]):
 
-class Serialize4(Generic[A, B, C, D, E], Serialize7[A, B, C, D, None, None, None, E]):
+  def __init__(self, t: Type[C], fn: Callable[[C], Tuple[A, B]], path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
 
-  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
-               sc: Serializer[C], sd: Serializer[D], 
-               ab: Callable[[E], Tuple[A, B, C, D]]) -> None:
-    super().__init__(sa, sb, sc, sd, 
-                   EmptySerializer(), EmptySerializer(), EmptySerializer(),
-                   Fn[E, Tuple[A, B, C, D, None, None, None]](
-                    lambda e: ab(e) + (None, None, None)))
+  def __call__(self, sa: Serializer[A], sb: Serializer[B]) -> Serializer[C]:
+    return Serializer7(sa, sb, EmptySerializer(),
+            EmptySerializer(), EmptySerializer(), EmptySerializer(),
+            EmptySerializer(), lambda x: self._fn(x) + (None, None, None, None, None),
+            self._path)
 
-class Serialize5(Generic[A, B, C, D, E, F], Serialize7[A, B, C, D, E, None, None, F]):
+class Serialize3(Generic[A, B, C, D]):
 
-  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
-               sc: Serializer[C], sd: Serializer[D], 
-               se: Serializer[E], ab: Callable[[F], Tuple[A, B, C, D, E]]) -> None:
-    super().__init__(sa, sb, sc, sd, se,
-                   EmptySerializer(), EmptySerializer(),
-                   Fn[F, Tuple[A, B, C, D, E, None, None]](
-                    lambda f: ab(f) + (None, None)))
+  def __init__(self, t: Type[D], fn: Callable[[D], Tuple[A, B, C]], 
+               path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
 
-class Serialize6(Generic[A, B, C, D, E, F, G], Serialize7[A, B, C, D, E, F, None, G]):
+  def __call__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C]) -> Serializer[D]:
+    return Serializer7(sa, sb, sc,
+            EmptySerializer(), EmptySerializer(), EmptySerializer(),
+            EmptySerializer(), lambda x: self._fn(x) + (None, None, None, None),
+            self._path)
 
-  def __init__(self, sa: Serializer[A], sb: Serializer[B], 
-               sc: Serializer[C], sd: Serializer[D], 
-               se: Serializer[E], sf: Serializer[F],
-               ab: Callable[[G], Tuple[A, B, C, D, E, F]]) -> None:
-    super().__init__(sa, sb, sc, sd, se, sf, EmptySerializer(),
-                   Fn[G, Tuple[A, B, C, D, E, F, None]](
-                    lambda g: ab(g) + (None,)))
+class Serialize4(Generic[A, B, C, D, E]):
+
+  def __init__(self, t: Type[E], fn: Callable[[E], Tuple[A, B, C, D]], 
+               path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
+
+  def __call__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
+               sd: Serializer[D]) -> Serializer[E]:
+    return Serializer7(sa, sb, sc, sd,
+            EmptySerializer(), EmptySerializer(), EmptySerializer(), 
+            lambda x: self._fn(x) + (None, None, None),
+            self._path)
+
+class Serialize5(Generic[A, B, C, D, E, F]):
+
+  def __init__(self, t: Type[F], fn: Callable[[F], Tuple[A, B, C, D, E]], 
+               path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
+
+  def __call__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
+               sd: Serializer[D], se: Serializer[E]) -> Serializer[F]:
+    return Serializer7(sa, sb, sc, sd, se,
+            EmptySerializer(), EmptySerializer(), 
+            lambda x: self._fn(x) + (None, None),
+            self._path)
+
+class Serialize6(Generic[A, B, C, D, E, F, G]):
+
+  def __init__(self, t: Type[G], fn: Callable[[G], Tuple[A, B, C, D, E, F]], 
+               path: List[str] = []) -> None:
+    self._fn = fn
+    self._path = path
+
+  def __call__(self, sa: Serializer[A], sb: Serializer[B], sc: Serializer[C],
+               sd: Serializer[D], se: Serializer[E], sf: Serializer[F]) -> Serializer[G]:
+    return Serializer7(sa, sb, sc, sd, se, sf, EmptySerializer(), 
+            lambda x: self._fn(x) + (None,),
+            self._path)
 
 def serialize_dict(d: JsonDict) -> JsonType:
   return F3(d)
@@ -498,23 +572,43 @@ def serialize_dict(d: JsonDict) -> JsonType:
 def serialize_json_list(l: JsonList) -> JsonType:
   return F2(l)
 
-def serialize_str(s: str) -> JsonType:
+def serialize_str_fn(s: str) -> JsonType:
   return F1(F1(s))
 
-def serialize_int(i: int) -> JsonType:
+def serialize_str(top: str, path: List[str] = []) -> Serializer[str]:
+  return Serializer(top, path, serialize_str_fn)
+
+def serialize_int_fn(i: int) -> JsonType:
   return F1(F2(i))
 
-def serialize_bool(b: bool) -> JsonType:
+def serialize_int(top: str, path: List[str] = []) -> Serializer[int]:
+  return Serializer(top, path, serialize_int_fn)
+
+def serialize_bool_fn(b: bool) -> JsonType:
   return F1(F3(b))
 
-def serialize_none(n: None) -> JsonType:
+def serialize_bool(top: str, path: List[str] = []) -> Serializer[bool]:
+  return Serializer(top, path, serialize_bool_fn)
+
+def serialize_none_fn(n: None) -> JsonType:
   return F1(F4(n))
 
-def serialize_optional(f: SerializeFn[A]) -> SerializeFn[Sum2[None, A]]:
-  return fold2[None, A, JsonType]((serialize_none, f))
+def serialize_none(top: str, path: List[str] = []) -> Serializer[None]:
+  return Serializer(top, path, serialize_none_fn)
 
-def serialize_list(f: SerializeFn[A]) -> SerializeFn[List[A]]:
+def serialize_optional_fn(f: SerializeFn[A]) -> SerializeFn[Sum2[None, A]]:
+  return fold2[None, A, JsonType]((serialize_none_fn, f))
+
+def serialize_optional(f: Serializer[A]) -> Serializer[Sum2[None, A]]:
+  return Serializer(f._path[0], f._path[1:], 
+    fold2[None, A, JsonType]((serialize_none_fn, f._fn)))
+
+def serialize_list_fn(f: SerializeFn[A]) -> SerializeFn[List[A]]:
   return Fn[List[A], JsonType](lambda x: F2(JsonList(list(map(f, x)))))
+
+def serialize_list(f: Serializer[A]) -> Serializer[List[A]]:
+  return Serializer(f._path[0], f._path[1:], 
+    Fn[List[A], JsonType](lambda x: F2(JsonList(list(map(f._fn, x))))))
 
 class ExtendSerialize(Generic[A, B]):
   
